@@ -41,8 +41,6 @@ def dilate_mask(mask: np.ndarray, radius: int) -> np.ndarray:
 # -----------------------------------------------------------------------------
 # Raster geometry (OpenCV; masks use row/col, drawing uses x/y = col/row)
 # -----------------------------------------------------------------------------
-
-
 def carve_disk(mask: np.ndarray, center: RC, radius: int) -> None:
     if radius < 0:
         return
@@ -194,38 +192,32 @@ def build_route_polylines(
 
     max_offset = min(
         cfg.route_separation_ratio * cfg.size,
-        0.32 * route_distance,
+        0.5 * route_distance,
     )
     offsets = np.linspace(-max_offset,
                           max_offset,
                           cfg.num_routes,
                           dtype=np.float32)
-    # Add a small common shift so maps are not always mirror-symmetric.
     offsets += float(rng.uniform(-0.06, 0.06) * cfg.size)
 
-    ts = np.linspace(0.0, 1.0, cfg.control_points, dtype=np.float32)
-    margin = cfg.border_width + cfg.robot_radius + cfg.protected_core_radius + 2
-    polylines: list[np.ndarray] = []
+    num_points = 7
+    idx_ratios = np.linspace(0.0, 1.0, num_points, dtype=np.float32)
+    offset_ratios = np.sin(idx_ratios * math.pi)
+    offset_ratios += float(rng.uniform(-0.06, 0.06))
+    offset_ratios = offset_ratios / offset_ratios.max()
 
-    for route_index, route_offset in enumerate(offsets):
+    margin = cfg.border_width + cfg.robot_radius + 2
+    polylines: list[np.ndarray] = []
+    for route_offset in offsets:
         points: list[np.ndarray] = []
-        route_phase = float(rng.uniform(-0.25, 0.25))
-        for control_index, t in enumerate(ts):
-            base = (1.0 - t) * start_f + t * goal_f
-            if control_index in (0, len(ts) - 1):
-                point = base
-            else:
-                envelope = math.sin(math.pi * float(t))
-                wave = 1.0 + 0.12 * math.sin(2.0 * math.pi * float(t) +
-                                             route_phase + route_index)
-                normal_offset = float(route_offset) * envelope * wave
-                normal_offset += float(
-                    rng.normal(0.0,
-                               cfg.control_normal_jitter_ratio * cfg.size))
-                tangent_offset = float(
-                    rng.normal(0.0,
-                               cfg.control_tangent_jitter_ratio * cfg.size))
-                point = base + normal * normal_offset + tangent * tangent_offset
+        for control_index, (idx_ratio, offset_ratio) in enumerate(
+                zip(idx_ratios, offset_ratios)):
+            point = (1.0 - idx_ratio) * start_f + idx_ratio * goal_f
+            if control_index != 0 and control_index != num_points - 1:
+                normal_offset = offset_ratio * route_offset
+                normal_offset += float(rng.normal(-0.02, 0.02) * cfg.size)
+                tangent_offset = float(rng.normal(-0.02, 0.02) * cfg.size)
+                point += normal * normal_offset + tangent * tangent_offset
                 point = np.clip(point, margin, cfg.size - margin - 1)
             points.append(point.astype(np.float32))
         polylines.append(np.stack(points, axis=0))
@@ -238,20 +230,17 @@ def build_free_space(
     polylines: Sequence[np.ndarray],
     cfg: GenCfg,
     rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Carve corridors / rooms / links / branches; build per-route guide masks."""
     free_mask = np.zeros((cfg.size, cfg.size), dtype=bool)
-    protected_core = np.zeros_like(free_mask)
     guide_masks: list[np.ndarray] = []
 
-    # Main K routes.
     for polyline in polylines:
         guide = np.zeros_like(free_mask)
         corridor_radius = int(
-            rng.integers(cfg.corridor_radius_min, cfg.corridor_radius_max + 1))
-        carve_polyline(free_mask, polyline, corridor_radius)
-        carve_polyline(protected_core, polyline, cfg.protected_core_radius)
-        carve_polyline(guide, polyline,
-                       max(cfg.protected_core_radius + 2, corridor_radius - 2))
+            rng.integers(cfg.robot_radius * 2, cfg.robot_radius * 3))
+        carve_polyline(free_mask, polyline, corridor_radius + 2)
+        carve_polyline(guide, polyline, max(1, corridor_radius))
         guide_masks.append(guide)
 
         room_count = int(
@@ -267,12 +256,7 @@ def build_free_space(
 
     carve_disk(free_mask, start, cfg.endpoint_room_radius)
     carve_disk(free_mask, goal, cfg.endpoint_room_radius)
-    carve_disk(protected_core, start,
-               cfg.protected_core_radius + cfg.robot_radius + 3)
-    carve_disk(protected_core, goal,
-               cfg.protected_core_radius + cfg.robot_radius + 3)
 
-    # Cross-links make the map less like K isolated tubes and add mixed routes.
     for index in range(len(polylines) - 1):
         if rng.random() > cfg.crosslink_probability:
             continue
@@ -281,10 +265,8 @@ def build_free_space(
         b = polyline_point(polylines[index + 1],
                            alpha + float(rng.uniform(-0.08, 0.08)))
         link = np.stack([a, b], axis=0)
-        carve_polyline(free_mask, link, cfg.corridor_radius_min)
-        carve_polyline(protected_core, link, cfg.protected_core_radius)
+        carve_polyline(free_mask, link, cfg.robot_radius + 1)
 
-    # Side rooms/branches create dead ends and local planning distractions.
     branch_count = int(
         rng.integers(cfg.side_branches_min, cfg.side_branches_max + 1))
     for _ in range(branch_count):
@@ -298,56 +280,24 @@ def build_free_space(
         margin = cfg.border_width + cfg.robot_radius + 3
         endpoint = np.clip(endpoint, margin, cfg.size - margin - 1)
         branch = np.stack([anchor, endpoint], axis=0)
-        carve_polyline(free_mask, branch, cfg.corridor_radius_min)
-        # Protect only the first half; a branch may legitimately become a dead end.
-        midpoint = 0.5 * (anchor + endpoint)
-        carve_polyline(
-            protected_core,
-            np.stack([anchor, midpoint], axis=0),
-            cfg.protected_core_radius,
-        )
+        carve_polyline(free_mask, branch, cfg.robot_radius + 1)
         carve_disk(
             free_mask,
             (int(round(float(endpoint[0]))), int(round(float(endpoint[1])))),
             int(rng.integers(cfg.room_radius_min, cfg.room_radius_max + 1)),
         )
 
-    return free_mask, protected_core, guide_masks
+    return free_mask, guide_masks
 
 
-def add_pillars(
+def seal_occupancy(
     free_mask: np.ndarray,
-    protected_core: np.ndarray,
     start: RC,
     goal: RC,
     cfg: GenCfg,
-    rng: np.random.Generator,
 ) -> np.ndarray:
+    """Invert free space, force a border, and keep start/goal free."""
     occupancy = ~free_mask
-    safe = protected_core.copy()
-    carve_disk(safe, start, cfg.endpoint_room_radius // 2)
-    carve_disk(safe, goal, cfg.endpoint_room_radius // 2)
-
-    for _ in range(cfg.obstacle_attempts):
-        if rng.random() > cfg.obstacle_probability:
-            continue
-        center = (
-            int(
-                rng.integers(cfg.border_width + 3,
-                             cfg.size - cfg.border_width - 3)),
-            int(
-                rng.integers(cfg.border_width + 3,
-                             cfg.size - cfg.border_width - 3)),
-        )
-        radius = int(
-            rng.integers(cfg.obstacle_radius_min, cfg.obstacle_radius_max + 1))
-        candidate = np.zeros_like(occupancy)
-        carve_disk(candidate, center, radius)
-        candidate &= ~occupancy
-        candidate &= ~safe
-        if int(candidate.sum()) >= 8:
-            occupancy[candidate] = True
-
     b = cfg.border_width
     occupancy[:b, :] = True
     occupancy[-b:, :] = True
@@ -576,16 +526,24 @@ def generate_single_sample(
         start, goal, tangent, normal = sample_start_goal(cfg, rng)
     except RuntimeError:
         return None
+
     polylines = build_route_polylines(start, goal, tangent, normal, cfg, rng)
-    free_mask, protected_core, guide_masks = build_free_space(
-        start, goal, polylines, cfg, rng)
-    occupancy = add_pillars(free_mask, protected_core, start, goal, cfg, rng)
+    free_mask, guide_masks = build_free_space(start, goal, polylines, cfg, rng)
+    occupancy = seal_occupancy(free_mask, start, goal, cfg)
+
+    # Search with extra clearance so expert paths stay away from walls;
+    # shortcut / validate use the nominal robot inflation.
+    search_map = inflate_occupancy(
+        occupancy, cfg.robot_radius + cfg.search_inflate_extra)
     planning_map = inflate_occupancy(occupancy, cfg.robot_radius)
     if planning_map[start] or planning_map[goal]:
         return None
+    # Extra inflation may cover endpoint cells; keep them traversable for search.
+    search_map[start] = False
+    search_map[goal] = False
 
-    route_result = generate_expert_routes(planning_map, guide_masks, start,
-                                          goal, cfg, rng)
+    route_result = generate_expert_routes(search_map, guide_masks, start, goal,
+                                          cfg, rng)
     if route_result is None:
         return None
     routes, optimal_length = route_result

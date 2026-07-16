@@ -22,7 +22,7 @@ class Args:
     output_dir: Path = Path("../datasets/genplan256")
     shard_size: int = 100
     seed: int = 7
-    robot_radius: int = 2
+    robot_radius: int = 5
     preview_count: int = 16
     max_map_attempts: int = 80
 
@@ -33,20 +33,16 @@ class GenCfg:
     num_routes: int = 4
     action_horizon: int = 64
     max_raw_path_points: int = 2048
+    robot_radius: int = 5
 
     # Start/goal and route skeleton.
     border_width: int = 3
     endpoint_margin: int = 18
     endpoint_center_jitter_ratio: float = 0.09
     min_start_goal_distance_ratio: float = 0.70
-    route_separation_ratio: float = 0.18
-    control_points: int = 6
-    control_normal_jitter_ratio: float = 0.025
-    control_tangent_jitter_ratio: float = 0.018
+    route_separation_ratio: float = 0.5
 
     # Free-space geometry.
-    corridor_radius_min: int = 7
-    corridor_radius_max: int = 12
     protected_core_radius: int = 5
     endpoint_room_radius: int = 18
     room_radius_min: int = 9
@@ -57,14 +53,10 @@ class GenCfg:
     side_branches_max: int = 8
     crosslink_probability: float = 0.45
 
-    # Obstacle placement and planning clearance.
-    obstacle_attempts: int = 42
-    obstacle_probability: float = 0.65
-    obstacle_radius_min: int = 3
-    obstacle_radius_max: int = 9
-    robot_radius: int = 2
-
     # Search and route acceptance.
+    # Expert search uses robot_radius + search_inflate_extra; shortcut/validate
+    # use robot_radius only so paths stay centered while chords stay feasible.
+    search_inflate_extra: int = 3
     guide_penalty: float = 8.0
     random_cost_strength: float = 0.35
     random_cost_sigma: float = 14.0
@@ -120,14 +112,11 @@ def config_init(args: Args) -> GenCfg:
         max_map_attempts=args.max_map_attempts,
         border_width=max(2, round(3 * scale)),
         endpoint_margin=max(10, round(18 * scale)),
-        corridor_radius_min=max(3, round(7 * scale)),
-        corridor_radius_max=max(5, round(12 * scale)),
         protected_core_radius=max(2, round(5 * scale)),
         endpoint_room_radius=max(8, round(18 * scale)),
         room_radius_min=max(5, round(9 * scale)),
         room_radius_max=max(8, round(20 * scale)),
-        obstacle_radius_min=max(2, round(3 * scale)),
-        obstacle_radius_max=max(4, round(9 * scale)),
+        search_inflate_extra=max(1, round(3 * scale)),
         random_cost_sigma=max(4.0, 14.0 * scale),
         route_iou_radius=max(1, round(3 * scale)),
     )
