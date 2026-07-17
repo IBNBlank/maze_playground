@@ -217,4 +217,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-datasets/**
+*.mp4
+*.png
+*videos*
+*runs*
+*demos*
+*.h5
+!task/my_cabinet*/**
+demons/**
+dataset/**
+feishu.json

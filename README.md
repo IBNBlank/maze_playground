@@ -10,7 +10,7 @@ cd bench_data
 # or
 ../.venv/bin/python data_gen.py \
   --num-maps 500 --size 256 --num-routes 4 --seed 56 \
-  --output-dir ../datasets/genplan256_r4
+  --output-dir ../dataset/genplan256_r4
 ```
 
 `run_gen.sh` loops over `NUM_ROUTES_LIST` (default `2 3 4 5 6`), writing each dataset to `${OUTPUT_DIR}_r${num_routes}` with `seed = num_routes * 14`.
@@ -32,11 +32,11 @@ Outputs per dataset:
 | `planning_maps` | Occupancy dilated by `robot_radius` |
 | `starts_rc` / `goals_rc` | Start / goal in `[row, col]` |
 | `waypoints_xy` | `(K, H+1, 2)` normalized absolute `xy` |
-| `action_chunks` | `(K, H, 2)` = `H * diff(waypoints_xy)` |
+| `action_chunks` | `(K, H, 2)` pixel `(dx, dy)` with `|dx|,|dy| <= max_abs_delta` (default 5); L∞-maximal steps, then zeros after goal |
 | `raw_paths_rc` | Grid expert paths (padded) |
 | `route_lengths` / `optimal_lengths` | Path length stats |
 
-Decode: `q[i+1] = q[i] + action[i] / action_horizon`.
+Decode: `pixel[i+1] = pixel[i] + action[i]`, `q = pixel / (size - 1)`.
 
 ## Single-map debug
 
@@ -45,7 +45,7 @@ Dump every intermediate stage for one accepted map:
 ```bash
 cd bench_data
 ../.venv/bin/python data_gen_single.py \
-  --output-dir ../datasets/genplan256_single \
+  --output-dir ../dataset/genplan256_single \
   --size 256 --num-routes 4 --seed 7
 ```
 
@@ -67,7 +67,7 @@ flowchart TD
     D --> E2["inflate → planning_map<br/>radius = robot_radius"]
     E1 --> F[generate_expert_routes on search_map]
     F --> G[shortcut_path on planning_map]
-    G --> H[resample_polyline + action_chunks]
+    G --> H[L-inf max-step action_chunks + zero pad]
     H --> I[validate_waypoints on planning_map]
     I --> J[final sample]
 
@@ -94,6 +94,6 @@ flowchart TD
    - `planning_map`: `robot_radius` — shortcut and waypoint validation; stored as `planning_maps`.
 6. **expert routes** — On `search_map`, per guide: smooth random cost + guide penalty → MCP path; reject on length / buffered IoU.
 7. **shortcut** — On `planning_map`, farthest free chord inside each guide (mode-preserving simplify).
-8. **waypoints / actions** — Arc-length resample to `action_horizon + 1` normalized `xy`; actions = scaled diffs.
+8. **waypoints / actions** — Walk the shortcut path with L∞-maximal pixel steps (`|dx|,|dy| <= max_abs_delta`); pad to fixed `action_horizon` with zeros after the goal.
 9. **validate** — Consecutive waypoint chords must be free on `planning_map`.
 10. **accept / retry** — Any failed check returns `None`; outer loop retries up to `max_map_attempts`.

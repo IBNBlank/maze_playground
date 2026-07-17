@@ -491,25 +491,114 @@ def resample_polyline(path_xy: np.ndarray, num_points: int) -> np.ndarray:
     return result
 
 
+def _linf(delta: np.ndarray) -> float:
+    return float(max(abs(float(delta[0])), abs(float(delta[1]))))
+
+
+def _max_linf_delta(direction_xy: np.ndarray, max_abs: float) -> np.ndarray:
+    """Scale direction so max(|dx|, |dy|) == max_abs (L∞-maximal step).
+
+    Examples with max_abs=5: direction (1, 0.5) -> (5, 2.5); (1, 2) -> (2.5, 5).
+    """
+    vx, vy = float(direction_xy[0]), float(direction_xy[1])
+    dominant = max(abs(vx), abs(vy))
+    if dominant <= 1e-12:
+        return np.zeros(2, dtype=np.float64)
+    scale = max_abs / dominant
+    return np.asarray([vx * scale, vy * scale], dtype=np.float64)
+
+
+def _segment_step(
+    pos: np.ndarray,
+    path_xy: np.ndarray,
+    seg_index: int,
+    max_abs: float,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Advance along the current polyline segment with an L∞-maximal step.
+
+    Shortcut segments are already collision-free, so no ray checks are needed.
+    """
+    while seg_index < len(path_xy) - 1:
+        target = path_xy[seg_index + 1]
+        to_target = target - pos
+        if _linf(to_target) <= 1e-9:
+            seg_index += 1
+            pos = target
+            continue
+        if _linf(to_target) <= max_abs + 1e-9:
+            return target, to_target, seg_index + 1
+        delta = _max_linf_delta(to_target, max_abs)
+        return pos + delta, delta, seg_index
+    return pos, np.zeros(2, dtype=np.float64), seg_index
+
+
 def route_to_chunk(
     route_rc: np.ndarray,
     planning_map: np.ndarray,
     guide_mask: np.ndarray,
     cfg: GenCfg,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Convert a grid route into a fixed-horizon L∞-maximal action chunk.
+
+    Actions are pixel-space (dx, dy) with |dx|, |dy| <= max_abs_delta. Each
+    non-terminal step maximizes the L∞ magnitude along the current shortcut
+    segment (analytical; no per-step collision search). After the goal is
+    reached, remaining actions are zero and waypoints stay at the goal.
+    Returns None if the route needs more than action_horizon steps.
+    """
     simplified_rc = shortcut_path(route_rc, planning_map, guide_mask)
-    simplified_xy = simplified_rc[:, [1, 0]]  # [row,col] -> [x,y]
-    pixel_waypoints = resample_polyline(simplified_xy, cfg.action_horizon + 1)
-    waypoints_xy = pixel_waypoints / float(cfg.size - 1)
-    actions = np.diff(waypoints_xy, axis=0) * float(cfg.action_horizon)
-    return waypoints_xy.astype(np.float32), actions.astype(np.float32)
+    path_xy = simplified_rc[:, [1, 0]].astype(np.float64)  # [row,col] -> [x,y]
+    max_abs = float(cfg.max_abs_delta)
+    horizon = int(cfg.action_horizon)
+    scale = float(cfg.size - 1)
+
+    pixel_waypoints = np.empty((horizon + 1, 2), dtype=np.float64)
+    actions = np.zeros((horizon, 2), dtype=np.float64)
+    pos = path_xy[0].copy()
+    pixel_waypoints[0] = pos
+    goal = path_xy[-1]
+    seg_index = 0
+    step = 0
+
+    while _linf(goal - pos) > 1e-7:
+        if step >= horizon:
+            return None
+        end_pt, delta, seg_index = _segment_step(pos, path_xy, seg_index,
+                                                 max_abs)
+        if _linf(delta) <= 1e-12:
+            rem = goal - pos
+            if _linf(rem) <= max_abs + 1e-9:
+                actions[step] = rem
+                pos = goal.copy()
+                step += 1
+                pixel_waypoints[step] = pos
+                break
+            return None
+        actions[step] = delta
+        pos = end_pt
+        step += 1
+        pixel_waypoints[step] = pos
+
+    if step == 0:
+        pixel_waypoints[:] = goal
+    else:
+        pixel_waypoints[step:] = pos
+    actions[step:] = 0.0
+
+    if np.any(np.abs(actions) > max_abs + 1e-5):
+        return None
+    waypoints_xy = (pixel_waypoints / scale).astype(np.float32)
+    return waypoints_xy, actions.astype(np.float32)
 
 
 def validate_waypoints(waypoints_xy: np.ndarray, planning_map: np.ndarray,
                        cfg: GenCfg) -> bool:
     pixels_xy = waypoints_xy * float(cfg.size - 1)
     pixels_rc = pixels_xy[:, [1, 0]]
+    # Only validate motion segments; trailing holds at the goal are zero-length.
     for a, b in zip(pixels_rc[:-1], pixels_rc[1:]):
+        if np.allclose(a, b, atol=1e-6):
+            continue
         a_rc = (int(round(float(a[0]))), int(round(float(a[1]))))
         b_rc = (int(round(float(b[0]))), int(round(float(b[1]))))
         if not line_is_free(a_rc, b_rc, planning_map):
@@ -559,9 +648,13 @@ def generate_single_sample(
     route_lengths = np.empty(cfg.num_routes, dtype=np.float32)
 
     for index, route in enumerate(routes):
-        wp, action = route_to_chunk(route, planning_map, guide_masks[index],
-                                    cfg)
+        chunk = route_to_chunk(route, planning_map, guide_masks[index], cfg)
+        if chunk is None:
+            return None
+        wp, action = chunk
         if not validate_waypoints(wp, planning_map, cfg):
+            return None
+        if np.any(np.abs(action) > cfg.max_abs_delta + 1e-5):
             return None
         waypoints[index] = wp
         actions[index] = action
@@ -659,8 +752,15 @@ def main() -> None:
         "config": "config.json",
         "action_encoding": {
             "waypoints_xy": "absolute x,y normalized by size-1",
-            "action_chunks": "action_horizon * diff(waypoints_xy)",
-            "decode": "q[i+1] = q[i] + action[i] / action_horizon",
+            "action_chunks": (
+                "pixel-space (dx, dy) with |dx|,|dy| <= max_abs_delta; "
+                "each motion step maximizes L-inf along the shortcut path; "
+                "after goal, remaining steps are (0, 0)"
+            ),
+            "decode": "pixel[i+1] = pixel[i] + action[i]; "
+                      "q = pixel / (size - 1)",
+            "action_horizon": gen_cfg.action_horizon,
+            "max_abs_delta": gen_cfg.max_abs_delta,
         },
     }
     (args.output_dir / "manifest.json").write_text(

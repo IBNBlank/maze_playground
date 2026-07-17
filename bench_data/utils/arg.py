@@ -18,8 +18,11 @@ class Args:
     num_maps: int = 1000
     size: int = 256
     num_routes: int = 4
-    action_horizon: int = 64
-    output_dir: Path = Path("../datasets/genplan256")
+    # Fixed chunk length; trailing zeros after goal. Empirically ~50–70 steps
+    # at size=256 / max_abs_delta=5 after shortcut (see route_to_chunk).
+    action_horizon: int = 72
+    max_abs_delta: float = 5.0
+    output_dir: Path = Path("../dataset/genplan256")
     shard_size: int = 100
     seed: int = 7
     robot_radius: int = 5
@@ -31,7 +34,8 @@ class Args:
 class GenCfg:
     size: int = 256
     num_routes: int = 4
-    action_horizon: int = 64
+    action_horizon: int = 72
+    max_abs_delta: float = 5.0
     max_raw_path_points: int = 2048
     robot_radius: int = 5
 
@@ -76,7 +80,7 @@ class GenCfg:
 class CheckArgs:
     """Visualize the same leading maps as preview, with per-step robots."""
 
-    dataset_dir: Path = Path("../datasets/genplan256_r2")
+    dataset_dir: Path = Path("../dataset/genplan256_r2")
     preview_count: int = 16
     output: Path | None = None
 
@@ -92,20 +96,20 @@ def args_init() -> Args:
             "--num-routes should be at least 2 for multimodal data")
     if args.action_horizon < 2:
         raise ValueError("--action-horizon must be at least 2")
+    if args.max_abs_delta <= 0.0:
+        raise ValueError("--max-abs-delta must be positive")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "config.json").write_text(json.dumps(
-        asdict(GenCfg()), indent=2, ensure_ascii=False),
-                                                 encoding="utf-8")
     return args
 
 
 def config_init(args: Args) -> GenCfg:
     scale = args.size / 256.0
-    return GenCfg(
+    cfg = GenCfg(
         size=args.size,
         num_routes=args.num_routes,
         action_horizon=args.action_horizon,
+        max_abs_delta=float(args.max_abs_delta),
         shard_size=args.shard_size,
         seed=args.seed,
         robot_radius=args.robot_radius,
@@ -120,3 +124,8 @@ def config_init(args: Args) -> GenCfg:
         random_cost_sigma=max(4.0, 14.0 * scale),
         route_iou_radius=max(1, round(3 * scale)),
     )
+    (args.output_dir / "config.json").write_text(
+        json.dumps(asdict(cfg), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return cfg

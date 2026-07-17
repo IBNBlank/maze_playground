@@ -18,7 +18,7 @@
 #   NUM_MAPS         : number of maps (default: 1000)
 #   SIZE             : map side length (default: 256)
 #   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
-#   ACTION_HORIZON   : action chunk length (default: 64)
+#   ACTION_HORIZON   : fixed action chunk length (default: 72); trailing zeros after goal
 #   OUTPUT_DIR       : output base dir (default: data/genplan${SIZE});
 #                      each run uses ${OUTPUT_DIR}_r${num_routes}
 #   SHARD_SIZE       : maps per NPZ shard (default: 100)
@@ -34,8 +34,8 @@ PYTHON="${PYTHON:-../.venv/bin/python}"
 NUM_MAPS="${NUM_MAPS:-500}"
 SIZE="${SIZE:-256}"
 NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4 5 6}"
-ACTION_HORIZON="${ACTION_HORIZON:-64}"
-OUTPUT_DIR="${OUTPUT_DIR:-../datasets/genplan${SIZE}}"
+ACTION_HORIZON="${ACTION_HORIZON:-72}"
+OUTPUT_DIR="${OUTPUT_DIR:-../dataset/genplan${SIZE}}"
 SHARD_SIZE="${SHARD_SIZE:-100}"
 ROBOT_RADIUS="${ROBOT_RADIUS:-5}"
 PREVIEW_COUNT="${PREVIEW_COUNT:-16}"
