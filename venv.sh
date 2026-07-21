@@ -24,6 +24,6 @@ fi
 source .venv/bin/activate
 
 # Install 
-uv pip install torch torchvision numpy opencv-python scikit-image tyro
+uv pip install torch torchvision numpy opencv-python scikit-image tyro tqdm
 
 cd $CUR_DIR

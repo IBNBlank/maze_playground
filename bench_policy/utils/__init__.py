@@ -5,14 +5,3 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-
-"""Optimizers for BC policies."""
-
-from __future__ import annotations
-
-import torch.nn as nn
-import torch.optim as optim
-
-
-def build_bc_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
-    return optim.Adam(model.parameters(), lr=lr)

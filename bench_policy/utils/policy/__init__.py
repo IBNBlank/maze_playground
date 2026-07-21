@@ -6,13 +6,9 @@
 # Date  : 2026-07-21
 ################################################################
 
-"""Optimizers for BC policies."""
+from utils.policy.policy import PolicyBase, build_policy
 
-from __future__ import annotations
-
-import torch.nn as nn
-import torch.optim as optim
-
-
-def build_bc_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
-    return optim.Adam(model.parameters(), lr=lr)
+__all__ = [
+    "PolicyBase",
+    "build_policy",
+]
