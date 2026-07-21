@@ -1,6 +1,6 @@
 # maze_playground
 
-Multimodal planning-map dataset tools under `bench_data/`.
+Multimodal planning-map tools: dataset generation under `bench_data/`, imitation learning under `bench_policy/`.
 
 ## Batch generation
 
@@ -97,3 +97,113 @@ flowchart TD
 8. **waypoints / actions** — Walk the shortcut path with L∞-maximal pixel steps (`|dx|,|dy| <= max_abs_delta`); pad to fixed `action_horizon` with zeros after the goal.
 9. **validate** — Consecutive waypoint chords must be free on `planning_map`.
 10. **accept / retry** — Any failed check returns `None`; outer loop retries up to `max_map_attempts`.
+
+## bench_policy
+
+IL training / evaluation on `datasets/{dataset_name}` (build via `bench_data/`).
+`run_name = Seed{seed}_{dataset_name}_{algo}`.
+
+```mermaid
+flowchart TB
+    dataset_data["../datasets/{dataset_name}"]
+
+    dataset_data --> train
+    subgraph train["train"]
+        train_bash["run_train.sh"]
+        train_bash --> |seed, dataset_name, algo, epochs| train_python["train.py"]
+
+        train_python --> train_log
+        subgraph train_log["logs"]
+            train_log_tensorboard["runs/{run_name}/ (tensorboard)"]
+            train_log_latest["runs/{run_name}/latest.json"]
+            train_log_success["runs/{run_name}/best_success.json"]
+        end
+
+        train_python --> train_ckpt
+        subgraph train_ckpt["ckpts"]
+            train_ckpt_mid["runs/{run_name}/ckpt_*.pt"]
+            train_ckpt_latest["runs/{run_name}/latest.pt"]
+            train_ckpt_final["runs/{run_name}/final_ckpt.pt"]
+            train_ckpt_success["runs/{run_name}/best_success_ckpt.pt"]
+        end
+
+        train_python --> train_notify
+        subgraph train_notify["notify"]
+            train_notify_feishu["feishu"]
+        end
+    end
+
+    train_ckpt --> eval
+    subgraph eval["eval"]
+        eval_bash["run_eval.sh"]
+        eval_bash --> |seed, dataset_name, algo, ckpt_name| eval_python["eval.py"]
+
+        eval_python --> eval_log
+        subgraph eval_log["logs"]
+            eval_log_tb["runs/{run_name}/eval/ (tensorboard)"]
+            eval_log_result["runs/{run_name}/eval_result.json"]
+        end
+
+        eval_python --> eval_notify
+        subgraph eval_notify["notify"]
+            eval_notify_feishu["feishu"]
+        end
+    end
+```
+
+### train.py
+
+```mermaid
+flowchart TB
+    start["tyro.cli TrainArgs"] --> run_name["run_name = Seed{seed}_{dataset}_{algo}"]
+    run_name --> early{"latest.json already finished?"}
+    early -->|yes| done_early["early exit"]
+    early -->|no| init["device + tensorboard + MazeWindowDataset"]
+    init --> policy["build_policy + optional resume latest.pt"]
+    policy --> loop
+
+    subgraph loop["for epoch in epochs"]
+        set_epoch["dataset.set_epoch(epoch_id)"]
+        set_epoch --> batches["policy.update_batch until epoch done"]
+        batches --> eval_gate{"epoch % eval_freq == 0?"}
+        eval_gate -->|yes| mid_eval["evaluate → save ckpt_*.pt / latest / best"]
+        eval_gate -->|no| next_ep["next epoch"]
+        mid_eval --> next_ep
+    end
+
+    loop --> final_eval["evaluate → final_ckpt.pt + mark iteration=-1"]
+    final_eval --> feishu["send_feishu_train_notification"]
+    feishu --> done["close writer"]
+```
+
+### eval.py
+
+```mermaid
+flowchart TB
+    start["tyro.cli EvalArgs"] --> run_name["run_name = Seed{seed}_{dataset}_{algo}"]
+    run_name --> init["device + tensorboard eval/ + MazeWindowDataset"]
+    init --> episodes["build_eval_episodes(num_eval)"]
+    episodes --> policy["build_policy + load runs/{run_name}/{ckpt_name}"]
+    policy --> roll["evaluate closed-loop rollouts"]
+    roll --> metrics["success_rate / success_average_steps / collision_rate"]
+    metrics --> log["log_eval_summary → tensorboard"]
+    log --> json["runs/{run_name}/eval_result.json"]
+    json --> feishu["send_feishu_eval_notification"]
+    feishu --> done["close writer"]
+```
+
+### Quick start
+
+```bash
+cd bench_policy
+./run_train.sh
+# or
+../.venv/bin/python train.py \
+  --algo bc --dataset-name genplan256_mix --seed 42 --epochs 50
+
+./run_eval.sh
+# or
+../.venv/bin/python eval.py \
+  --algo bc --dataset-name genplan256_mix --seed 42 \
+  --ckpt-name best_success_ckpt.pt
+```

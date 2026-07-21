@@ -7,8 +7,10 @@
 ################################################################
 
 import json, os, sys, tyro
+from collections import defaultdict
 
 import numpy as np
+import torch
 import tqdm
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,9 +26,7 @@ from utils.common import (
     save,
     device_init,
     tensorboard_init,
-    train_epoch,
     log_eval_summary,
-    format_eval_metric,
 )
 from utils.data import MazeWindowDataset, default_dataset_dir
 from utils.policy import build_policy
@@ -124,19 +124,44 @@ class TrainMazeIL:
               f"(global_step={self.global_step})")
 
     def _train_epoch(self, epoch_idx: int, epoch_id: int) -> float:
-        last_loss, self.global_step = train_epoch(
-            self.policy,
-            self.dataset,
-            epoch_id=epoch_id,
-            batch_size=self.args.batch_size,
-            device=self.device,
-            global_step=self.global_step,
-            log_freq=int(getattr(self.args, "log_freq", 0) or 0),
-            writer=self.writer,
-            epoch_idx=epoch_idx,
-            num_epochs=self.args.epochs,
-            progress_cls=tqdm.tqdm,
+        self.dataset.set_epoch(int(epoch_id), batch_size=self.args.batch_size)
+        loss_log = defaultdict(float)
+        steps_logged = 0
+        last_loss = float("nan")
+        log_freq = int(getattr(self.args, "log_freq", 0) or 0)
+
+        batch_pbar = tqdm.tqdm(
+            total=self.dataset.num_batches,
+            desc=(f"batch ep{epoch_idx + 1}/{self.args.epochs}"
+                  f" idx={epoch_id}"),
+            leave=False,
+            dynamic_ncols=True,
         )
+        while True:
+            batch = self.dataset.get_batch()
+            if batch is None:
+                break
+            batch = {
+                k: v.to(self.device, non_blocking=True)
+                if torch.is_tensor(v) else v
+                for k, v in batch.items()
+            }
+            loss_val = float(self.policy.update_batch(batch))
+            last_loss = loss_val
+            loss_log["loss"] += loss_val
+            steps_logged += 1
+            self.global_step += 1
+            batch_pbar.update(1)
+            batch_pbar.set_postfix(loss=f"{loss_val:.4f}")
+            if log_freq > 0 and self.global_step % log_freq == 0:
+                avg = loss_log["loss"] / max(steps_logged, 1)
+                self.writer.add_scalar("train/loss", avg, self.global_step)
+                loss_log.clear()
+                steps_logged = 0
+        batch_pbar.close()
+        if steps_logged > 0:
+            avg = loss_log["loss"] / steps_logged
+            self.writer.add_scalar("train/loss", avg, self.global_step)
         return last_loss
 
     def _eval_and_save(self, epoch_1based: int, is_final: bool = False):
@@ -146,36 +171,34 @@ class TrainMazeIL:
             self.policy,
             self.eval_episodes,
             device=self.device,
-            obs_horizon=1,
-            act_horizon=self.dataset.action_horizon,
             max_steps=self.dataset.action_horizon,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
         )
-        log_eval_summary(summary, writer=self.writer, global_step=self.global_step)
 
         success = float(summary["success_rate"])
         succ_steps = float(summary["success_average_steps"])
+        self.metrics.cur_success_rate = success
+        self.metrics.cur_success_average_steps = succ_steps
+        is_best = success >= self.metrics.best_success_rate
+        if is_best:
+            self.metrics.best_success_rate = success
+            self.metrics.best_success_average_steps = succ_steps
+
+        log_eval_summary(
+            summary,
+            writer=self.writer,
+            global_step=self.global_step,
+            best_rate=self.metrics.best_success_rate,
+            best_steps=self.metrics.best_success_average_steps,
+        )
         save(
             self.policy,
-            {
-                "epoch": epoch_1based if not is_final else self.args.epochs,
-                "success_rate": success,
-                "success_average_steps": succ_steps,
-                "is_final": is_final,
-            },
             run_name=self.run_name,
             metrics=self.metrics,
+            iteration=-1 if is_final else epoch_1based,
             global_step=self.global_step,
-        )
-        print(
-            f"eval_success={format_eval_metric('success_rate', success)} "
-            f"eval_success_steps="
-            f"{format_eval_metric('success_average_steps', succ_steps)} "
-            f"best_success="
-            f"{format_eval_metric('success_rate', self.metrics.best_success_rate)} "
-            f"best_success_steps="
-            f"{format_eval_metric('success_average_steps', self.metrics.best_success_average_steps)}"
+            is_best=is_best,
         )
 
     def run(self):
@@ -198,11 +221,8 @@ class TrainMazeIL:
             best_steps = self.metrics.best_success_average_steps
             epoch_pbar.set_postfix(
                 loss=f"{last_loss:.4f}" if last_loss == last_loss else "-",
-                best_succ=(format_eval_metric("success_rate", best)
-                           if best == best else "-"),
-                best_steps=(format_eval_metric("success_average_steps",
-                                               best_steps)
-                            if best == best else "-"),
+                best=(f"{best * 100:.1f}%/{best_steps:.1f}"
+                      if best == best else "-"),
                 idx=epoch_id,
             )
 
@@ -214,11 +234,8 @@ class TrainMazeIL:
                 best_steps = self.metrics.best_success_average_steps
                 epoch_pbar.set_postfix(
                     loss=f"{last_loss:.4f}" if last_loss == last_loss else "-",
-                    best_succ=(format_eval_metric("success_rate", best)
-                               if best == best else "-"),
-                    best_steps=(format_eval_metric("success_average_steps",
-                                                   best_steps)
-                                if best == best else "-"),
+                    best=(f"{best * 100:.1f}%/{best_steps:.1f}"
+                          if best == best else "-"),
                     idx=epoch_id,
                 )
 

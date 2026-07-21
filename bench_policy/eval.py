@@ -80,8 +80,6 @@ class EvalMazeIL:
             self.policy,
             self.episodes,
             device=self.device,
-            obs_horizon=1,
-            act_horizon=self.dataset.action_horizon,
             max_steps=self.max_steps,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
