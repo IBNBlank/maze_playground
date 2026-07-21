@@ -6,13 +6,14 @@
 # Date  : 2026-07-21
 ################################################################
 
-import json, os, random, shutil
+import json, math, os, random, shutil
+import cv2
+import torch
+import numpy as np
 from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 from typing import Any, Optional, Sequence
 from torch.utils.tensorboard import SummaryWriter
-
-import numpy as np
-import torch
 
 #--------------------------------#
 # init
@@ -76,7 +77,6 @@ class Metrics:
 
 def log_eval_summary(
     summary: dict,
-    *,
     writer=None,
     global_step: int = 0,
     best_rate: float | None = None,
@@ -111,22 +111,99 @@ def build_eval_episodes(
     order = np.arange(n, dtype=np.int64)
     if 0 < max_episodes < n:
         rng = np.random.default_rng(seed)
-        order = np.sort(rng.choice(n, size=int(max_episodes), replace=False))
+        order = rng.choice(n, size=int(max_episodes), replace=False)
     return [dataset.episode_at(int(i)) for i in order.tolist()]
+
+
+_PREVIEW_COLORS = {
+    "success": (25, 175, 85),
+    "collision": (225, 35, 35),
+    "fail": (225, 135, 25),
+}
+
+
+def _render_rollout_tile(
+    planning_map: np.ndarray,
+    path_xy: np.ndarray,
+    start_rc: np.ndarray,
+    goal_rc: np.ndarray,
+    *,
+    collided: bool,
+    reached: bool,
+) -> np.ndarray:
+    """RGB overlay: occupancy + rollout path + start/goal."""
+    rgb = np.where(planning_map[..., None] > 0, 35, 242).astype(np.uint8)
+    rgb = np.repeat(rgb, 3, axis=2)
+    if collided:
+        color = _PREVIEW_COLORS["collision"]
+    elif reached:
+        color = _PREVIEW_COLORS["success"]
+    else:
+        color = _PREVIEW_COLORS["fail"]
+
+    pts = np.asarray(path_xy, dtype=np.float64)
+    if len(pts) >= 2:
+        poly = np.empty((len(pts), 1, 2), dtype=np.int32)
+        poly[:, 0, 0] = np.rint(pts[:, 0]).astype(np.int32)
+        poly[:, 0, 1] = np.rint(pts[:, 1]).astype(np.int32)
+        cv2.polylines(
+            rgb,
+            [poly],
+            isClosed=False,
+            color=color,
+            thickness=2,
+            lineType=cv2.LINE_AA,
+        )
+
+    sr, sc = int(start_rc[0]), int(start_rc[1])
+    gr, gc = int(goal_rc[0]), int(goal_rc[1])
+    cv2.circle(rgb, (sc, sr), 4, (20, 215, 65), -1, lineType=cv2.LINE_AA)
+    cv2.circle(rgb, (sc, sr), 4, (0, 65, 0), 1, lineType=cv2.LINE_AA)
+    cv2.circle(rgb, (gc, gr), 4, (245, 45, 45), -1, lineType=cv2.LINE_AA)
+    cv2.circle(rgb, (gc, gr), 4, (85, 0, 0), 1, lineType=cv2.LINE_AA)
+    return rgb
+
+
+def save_eval_preview(
+    tiles: Sequence[np.ndarray],
+    path: str | Path,
+) -> None:
+    """Write a square-ish collage of rollout overlays to ``path``."""
+    if not tiles:
+        return
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    columns = int(math.ceil(math.sqrt(len(tiles))))
+    rows = int(math.ceil(len(tiles) / columns))
+    tile_h, tile_w = tiles[0].shape[:2]
+    canvas = np.full((rows * tile_h, columns * tile_w, 3), 255, dtype=np.uint8)
+    for index, tile in enumerate(tiles):
+        r0 = (index // columns) * tile_h
+        c0 = (index % columns) * tile_w
+        canvas[r0:r0 + tile_h, c0:c0 + tile_w] = tile
+    cv2.imwrite(str(path), cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
+    print(f"[eval] preview saved to {path}")
 
 
 def evaluate(
     policy,
     episodes: Sequence[dict],
-    *,
     device: torch.device,
     max_steps: int,
     goal_tol: float = 1.0,
     max_abs_delta: float = 5.0,
+    preview_path: Optional[str] = None,
+    preview_count: int = 16,
 ) -> dict:
-    """Closed-loop eval: infer action chunk, step until hit / goal / budget."""
+    """Closed-loop eval: infer action chunk, step until hit / goal / budget.
+
+    If ``preview_path`` is set, also write a collage of the first
+    ``preview_count`` rollout overlays.
+    """
     act_horizon = int(policy.pred_horizon)
+    want_preview = preview_path is not None and int(preview_count) > 0
     results = []
+    preview_tiles: list[np.ndarray] = []
     for ep in episodes:
         planning_map = np.asarray(ep["planning_map"])
         size = int(planning_map.shape[0])
@@ -147,6 +224,8 @@ def evaluate(
         steps = 0
         collided = False
         reached = False
+        record = want_preview and len(preview_tiles) < int(preview_count)
+        path = [cur.copy()] if record else None
 
         while steps < max_steps and not reached and not collided:
             if float(np.linalg.norm(cur - goal)) < goal_tol:
@@ -167,7 +246,8 @@ def evaluate(
                     torch.from_numpy(state[None]).to(device),
                 })[0].detach().cpu().numpy()
 
-            for a in actions[:min(act_horizon, max_steps - steps)]:
+            chunk = actions[:min(act_horizon, max_steps - steps)]
+            for ai, a in enumerate(chunk):
                 cur = np.clip(
                     cur +
                     np.clip(a.astype(np.float64), -1.0, 1.0) * max_abs_delta,
@@ -175,10 +255,22 @@ def evaluate(
                     size - 1,
                 )
                 steps += 1
+                if path is not None:
+                    path.append(cur.copy())
                 c, r = int(np.rint(cur[0])), int(np.rint(cur[1]))
                 if r < 0 or r >= h or c < 0 or c >= w or planning_map[r,
                                                                       c] > 0:
                     collided = True
+                    # finish drawing the rest of this chunk into / through walls
+                    if path is not None:
+                        for a2 in chunk[ai + 1:]:
+                            cur = np.clip(
+                                cur + np.clip(a2.astype(np.float64), -1.0, 1.0)
+                                * max_abs_delta,
+                                0.0,
+                                size - 1,
+                            )
+                            path.append(cur.copy())
                     break
                 if float(np.linalg.norm(cur - goal)) < goal_tol:
                     reached = True
@@ -187,6 +279,19 @@ def evaluate(
         if not collided and not reached:
             reached = float(np.linalg.norm(cur - goal)) < goal_tol
         results.append((collided, reached, steps))
+        if path is not None:
+            preview_tiles.append(
+                _render_rollout_tile(
+                    planning_map,
+                    np.asarray(path, dtype=np.float32),
+                    ep["start_rc"],
+                    ep["goal_rc"],
+                    collided=collided,
+                    reached=reached,
+                ))
+
+    if want_preview:
+        save_eval_preview(preview_tiles, preview_path)
 
     collided = np.asarray([r[0] for r in results], dtype=np.float64)
     reached = np.asarray([r[1] for r in results], dtype=np.float64)
@@ -220,14 +325,13 @@ def _to_cpu_tree(obj: Any) -> Any:
 
 def save(
     policy,
-    *,
     run_name: str,
     metrics: Metrics,
     iteration: int,
     global_step: int,
     is_best: bool = False,
 ) -> str:
-    """Write ``ckpt_*.pt`` / ``latest``; if ``is_best``, also snapshot best."""
+    """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best."""
     model = getattr(policy, "model", None)
     optimizer = getattr(policy, "optimizer", None)
     if model is None:
@@ -239,43 +343,34 @@ def save(
                  if int(iteration) < 0 else f"ckpt_{int(iteration)}.pt")
     ckpt_path = f"{run_dir}/{ckpt_name}"
 
-    metrics_dict = asdict(metrics)
-    checkpoint = {
-        "policy": _to_cpu_tree(model.state_dict()),
-        "iteration": int(iteration),
-        "global_step": int(global_step),
-        "metrics": metrics_dict,
-    }
+    checkpoint = {"policy": _to_cpu_tree(model.state_dict())}
     if optimizer is not None:
         checkpoint["optimizer"] = _to_cpu_tree(optimizer.state_dict())
     torch.save(checkpoint, ckpt_path)
 
-    latest_pt = f"{run_dir}/latest.pt"
     latest_json = f"{run_dir}/latest.json"
-    if os.path.abspath(ckpt_path) != os.path.abspath(latest_pt):
-        shutil.copy(ckpt_path, latest_pt)
     with open(latest_json, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "ckpt_name": ckpt_name,
                 "iteration": int(iteration),
                 "global_step": int(global_step),
-                "metrics": metrics_dict,
+                "metrics": asdict(metrics),
             },
             f,
             indent=2,
         )
 
     if is_best:
-        shutil.copy(latest_pt, f"{run_dir}/best_success_ckpt.pt")
+        shutil.copy(ckpt_path, f"{run_dir}/best_success_ckpt.pt")
         shutil.copy(latest_json, f"{run_dir}/best_success.json")
 
     print(f"ckpt saved to {ckpt_path}")
     return ckpt_path
 
 
-def load(policy, path: str) -> tuple[int, Metrics, dict]:
-    """Load policy weights and related training state from ``path``."""
+def load(policy, path: str) -> None:
+    """Load policy weights (and optimizer if present) from ``path``."""
     model = getattr(policy, "model", None)
     if model is None:
         raise RuntimeError("policy.model is required for load()")
@@ -290,8 +385,4 @@ def load(policy, path: str) -> tuple[int, Metrics, dict]:
     optimizer = getattr(policy, "optimizer", None)
     if optimizer is not None and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
-
-    metrics = Metrics.from_dict(ckpt.get("metrics"))
-    iteration = int(ckpt.get("iteration", 0))
-    print(f"ckpt loaded from {path} (iteration={iteration})")
-    return iteration, metrics, ckpt
+    print(f"ckpt loaded from {path}")

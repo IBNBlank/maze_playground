@@ -23,10 +23,6 @@ class TrainArgs:
     # algo / data
     algo: str = "bc"
     """policy algorithm: bc | act | dp | fm"""
-    state_dim: int = 4
-    """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
-    action_dim: int = 2
-    """action dimension: [dx, dy] in pixels"""
     dataset_name: str = "genplan256_mix"
     """subdir under ../datasets/"""
 
@@ -66,10 +62,6 @@ class EvalArgs:
     # algo / data
     algo: str = "bc"
     """policy algorithm: bc | act | dp | fm"""
-    state_dim: int = 4
-    """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
-    action_dim: int = 2
-    """action dimension: [dx, dy] in pixels"""
     dataset_name: str = "genplan256_mix"
     """subdir under ../datasets/"""
 
@@ -78,5 +70,5 @@ class EvalArgs:
     """number of episodes to evaluate"""
     goal_tol: float = 1.0
     """pixel L2 distance threshold for success (error < goal_tol)"""
-    capture_preview: bool = False
+    capture_preview: bool = True
     """save a small collage of rollout overlays under runs/{run_name}/"""

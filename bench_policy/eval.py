@@ -7,14 +7,8 @@
 ################################################################
 """Evaluation entry: ``EvalArgs`` -> dataset + policy -> closed-loop eval."""
 
-from __future__ import annotations
-
-import json
-import os
-import sys
-import time
-
-import tyro
+import json, os, sys, time, tyro
+from pathlib import Path
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,7 +23,7 @@ from utils.common import (
     device_init,
     log_eval_summary,
 )
-from utils.data import MazeWindowDataset, default_dataset_dir
+from utils.data import MazeWindowDataset
 from utils.policy import build_policy
 from utils.feishu import send_feishu_eval_notification
 
@@ -38,7 +32,7 @@ class EvalMazeIL:
     """Build dataset + policy from ``EvalArgs`` and run evaluation."""
 
     def __init__(self):
-        self.args = tyro.cli(EvalArgs)
+        self.args: EvalArgs = tyro.cli(EvalArgs)
         self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
         self.device = device_init(
@@ -52,9 +46,9 @@ class EvalMazeIL:
             hparams=vars(self.args),
         )
 
-        dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
+        dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
         self.dataset = MazeWindowDataset(dataset_dir)
-        self.max_steps = self.dataset.action_horizon
+        self.max_steps = self.dataset.pred_horizon
         self.episodes = build_eval_episodes(
             self.dataset,
             max_episodes=self.args.num_eval,
@@ -64,9 +58,9 @@ class EvalMazeIL:
         self.policy = build_policy(
             self.args.algo,
             obs_horizon=1,
-            pred_horizon=self.dataset.action_horizon,
-            state_dim=self.args.state_dim,
-            action_dim=self.args.action_dim,
+            pred_horizon=self.dataset.pred_horizon,
+            state_dim=self.dataset.state_dim,
+            action_dim=self.dataset.action_dim,
             device=self.device,
             lr=3e-4,
         )
@@ -83,6 +77,8 @@ class EvalMazeIL:
             max_steps=self.max_steps,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
+            preview_path=(f"runs/{self.run_name}/eval_preview.png"
+                          if self.args.capture_preview else None),
         )
         eval_time = time.perf_counter() - stime
 

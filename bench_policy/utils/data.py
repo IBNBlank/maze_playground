@@ -5,7 +5,6 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-
 """Sharded maze dataset.
 
 Usage:
@@ -14,20 +13,15 @@ Usage:
       ...
 
 Batch fields: map (H,W), state (1,4) in [0,1], action (T,2) in [-1,1].
+state_dim: int = 4: state dimension: [x, y, goal_x, goal_y] in normalized coords
+action_dim: int = 2: action dimension: [dx, dy] in pixels
 """
 
-from __future__ import annotations
-
 import json
+import torch
+import numpy as np
 from collections import OrderedDict
 from pathlib import Path
-
-import numpy as np
-import torch
-
-
-def default_dataset_dir(repo_dir: Path | str, dataset_name: str) -> Path:
-    return Path(repo_dir) / "datasets" / dataset_name
 
 
 class MazeWindowDataset:
@@ -37,12 +31,15 @@ class MazeWindowDataset:
         with open(self.dataset_dir / "dataset.json", encoding="utf-8") as f:
             summary = json.load(f)
         cfg_path = self.dataset_dir / "config.json"
-        config = (json.loads(cfg_path.read_text(encoding="utf-8"))
-                  if cfg_path.is_file() else {})
+        config = (json.loads(cfg_path.read_text(
+            encoding="utf-8")) if cfg_path.is_file() else {})
+
+        self.pred_horizon = int(summary["action_horizon"])
+        self.state_dim = int(summary["state_dim"])
+        self.action_dim = int(summary["action_dim"])
 
         self.shards = list(summary["shards"])
         self.num_samples = int(summary["num_samples"])
-        self.action_horizon = int(summary["action_horizon"])
         self.num_idx_perms = int(summary.get("num_idx_perms", 0))
         self.shard_size = int(
             summary.get("shard_size", self.shards[0]["num_samples"]))
@@ -68,8 +65,8 @@ class MazeWindowDataset:
 
     def set_epoch(self, epoch_id: int, batch_size: int):
         """Load all shards, reorder by epoch idx, reset batch cursor."""
-        indices = np.load(
-            self.dataset_dir / "idx" / f"epoch_{int(epoch_id):03d}.npy")
+        indices = np.load(self.dataset_dir / "idx" /
+                          f"epoch_{int(epoch_id):03d}.npy")
         if len(indices) != self.num_samples:
             raise ValueError(
                 f"epoch_{int(epoch_id):03d}.npy length {len(indices)} != "
@@ -88,16 +85,14 @@ class MazeWindowDataset:
         states = np.concatenate(states_l, axis=0)[order]
         actions = np.concatenate(actions_l, axis=0)[order]
         if len(maps) != self.num_samples:
-            raise ValueError(
-                f"concatenated samples {len(maps)} != "
-                f"num_samples {self.num_samples}")
+            raise ValueError(f"concatenated samples {len(maps)} != "
+                             f"num_samples {self.num_samples}")
 
         self._epoch = {"map": maps, "state": states, "action": actions}
         self._batch_size = int(batch_size)
         self._batch_i = 0
-        self._num_batches = (
-            (self.num_samples + self._batch_size - 1) // self._batch_size
-        )
+        self._num_batches = ((self.num_samples + self._batch_size - 1) //
+                             self._batch_size)
 
     def get_batch(self) -> dict[str, torch.Tensor] | None:
         """Next training batch from the epoch cache, or None when exhausted."""
@@ -121,11 +116,15 @@ class MazeWindowDataset:
                 axis=1,
             ) / self._state_scale
             return {
-                "map": np.asarray(z["map"], dtype=np.float32),
-                "state": state.astype(np.float32),
-                "state_rc": rc,
-                "action": np.asarray(z["action_chunk"], dtype=np.float32)
-                / self.max_abs_delta,
+                "map":
+                np.asarray(z["map"], dtype=np.float32),
+                "state":
+                state.astype(np.float32),
+                "state_rc":
+                rc,
+                "action":
+                np.asarray(z["action_chunk"], dtype=np.float32) /
+                self.max_abs_delta,
             }
 
     def _ensure_shard(self, shard_idx: int) -> dict:

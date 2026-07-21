@@ -8,6 +8,7 @@
 
 import json, os, sys, tyro
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -28,21 +29,16 @@ from utils.common import (
     tensorboard_init,
     log_eval_summary,
 )
-from utils.data import MazeWindowDataset, default_dataset_dir
+from utils.data import MazeWindowDataset
 from utils.policy import build_policy
 from utils.feishu import send_feishu_train_notification
-
-
-def _roll_epoch_ids(seed: int, epochs: int, num_idx_perms: int):
-    rng = np.random.default_rng(int(seed))
-    return rng.choice(num_idx_perms, size=epochs, replace=False).astype(np.int64)
 
 
 class TrainMazeIL:
     """Build dataset + policy from ``TrainArgs`` and run training."""
 
     def __init__(self):
-        self.args = tyro.cli(TrainArgs)
+        self.args: TrainArgs = tyro.cli(TrainArgs)
         self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
         latest_json = f"runs/{self.run_name}/latest.json"
@@ -68,7 +64,7 @@ class TrainMazeIL:
             hparams=vars(self.args),
         )
 
-        self.dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
+        self.dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
         self.dataset = MazeWindowDataset(self.dataset_dir)
         self.eval_episodes = build_eval_episodes(
             self.dataset,
@@ -79,18 +75,19 @@ class TrainMazeIL:
         self.policy = build_policy(
             self.args.algo,
             obs_horizon=1,
-            pred_horizon=self.dataset.action_horizon,
-            state_dim=self.args.state_dim,
-            action_dim=self.args.action_dim,
+            pred_horizon=self.dataset.pred_horizon,
+            state_dim=self.dataset.state_dim,
+            action_dim=self.dataset.action_dim,
             device=self.device,
             lr=self.args.lr,
         )
 
-        self.epoch_ids = _roll_epoch_ids(
-            self.args.seed,
-            self.args.epochs,
+        rng = np.random.default_rng(int(self.args.seed))
+        self.epoch_ids = rng.choice(
             self.dataset.num_idx_perms,
-        )
+            size=self.args.epochs,
+            replace=False,
+        ).astype(np.int64)
 
         self.metrics = Metrics()
         self.global_step = 0
@@ -98,28 +95,26 @@ class TrainMazeIL:
         self._resume_if_needed()
 
         print(f"[train] dataset={self.dataset_dir}")
-        print(
-            f"[train] samples={len(self.dataset)} "
-            f"shards={len(self.dataset.shards)}"
-        )
+        print(f"[train] samples={len(self.dataset)} "
+              f"shards={len(self.dataset.shards)}")
         print(f"[train] run_name={self.run_name} algo={self.args.algo}")
-        print(f"[train] action_horizon={self.dataset.action_horizon}")
+        print(f"[train] pred_horizon={self.dataset.pred_horizon}")
 
     def _resume_if_needed(self):
         latest_json = f"runs/{self.run_name}/latest.json"
-        latest_pt = f"runs/{self.run_name}/latest.pt"
-        if not os.path.isfile(latest_json) or not os.path.isfile(latest_pt):
+        if not os.path.isfile(latest_json):
             return
         with open(latest_json, "r", encoding="utf-8") as f:
             record = json.load(f)
-        iteration = int(record.get("iteration", 0))
-        if iteration < 0:
+
+        self.start_epoch = int(record.get("iteration", 0))
+        if self.start_epoch < 0:
             self.early_exit = True
             return
-        start_iter, metrics, ckpt = load(self.policy, latest_pt)
-        self.metrics = metrics
-        self.global_step = int(ckpt.get("global_step", 0))
-        self.start_epoch = max(0, int(start_iter))
+
+        self.global_step = int(record.get("global_step", 0))
+        self.metrics = Metrics.from_dict(record.get("metrics"))
+        load(self.policy, f"runs/{self.run_name}/{record.get('ckpt_name')}")
         print(f"[train] resume from epoch index {self.start_epoch} "
               f"(global_step={self.global_step})")
 
@@ -142,7 +137,8 @@ class TrainMazeIL:
             if batch is None:
                 break
             batch = {
-                k: v.to(self.device, non_blocking=True)
+                k:
+                v.to(self.device, non_blocking=True)
                 if torch.is_tensor(v) else v
                 for k, v in batch.items()
             }
@@ -171,7 +167,7 @@ class TrainMazeIL:
             self.policy,
             self.eval_episodes,
             device=self.device,
-            max_steps=self.dataset.action_horizon,
+            max_steps=self.dataset.pred_horizon,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
         )
