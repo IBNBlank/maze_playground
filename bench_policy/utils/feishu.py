@@ -5,7 +5,6 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-
 """Feishu (Lark) webhook notifications for maze IL train / eval.
 
 Reads ``{repo_dir}/feishu.json``:
@@ -18,12 +17,12 @@ Reads ``{repo_dir}/feishu.json``:
 ```
 """
 
-from __future__ import annotations
-
 import json
 import os
 import urllib.request
 from typing import Any, Optional, Sequence
+
+from .common import Metrics
 
 
 def _load_feishu_config(repo_dir: str) -> Optional[dict]:
@@ -159,36 +158,18 @@ def send_feishu_train_notification(
     dataset_name: str,
     seed: int,
     epochs: int,
-    metrics: Any,
+    metrics: Metrics,
     run_name: Optional[str] = None,
     enabled: bool = True,
 ) -> bool:
-    """Notify after one training run finishes.
-
-    ``metrics`` should expose ``best_success_rate`` and
-    ``best_success_average_steps`` (e.g. ``utils.common.Metrics``).
-    """
-    best_success = float(getattr(metrics, "best_success_rate", float("-inf")))
-    best_steps = float(
-        getattr(metrics, "best_success_average_steps", float("inf")))
-    if best_success != best_success or best_success == float("-inf"):
-        success_for_color = 0.0
-        success_text = "n/a"
-    else:
-        success_for_color = best_success
-        success_text = f"{best_success * 100:.2f}%"
-    if best_steps != best_steps or best_steps == float("inf"):
-        steps_text = "n/a"
-    else:
-        steps_text = f"{best_steps:.2f}"
-
+    """Notify after one training run finishes."""
     md_lines = [
         f"- **algo:** {algo}",
         f"- **dataset:** {dataset_name}",
         f"- **seed:** {seed}",
         f"- **epochs:** {epochs}",
-        f"- **best_success:** {success_text}",
-        f"- **best_success_average_steps:** {steps_text}",
+        f"- **best_success:** {metrics.best_success_rate * 100:.2f}%",
+        f"- **best_success_average_steps:** {metrics.best_success_average_steps:.2f}",
     ]
     if run_name:
         md_lines.insert(0, f"- **run:** {run_name}")
@@ -196,7 +177,7 @@ def send_feishu_train_notification(
         repo_dir,
         mode="train",
         markdown="\n".join(md_lines),
-        success_rate=success_for_color,
+        success_rate=metrics.best_success_rate,
         enabled=enabled,
     )
 

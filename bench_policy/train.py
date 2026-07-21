@@ -19,16 +19,16 @@ from utils.common import (
     Metrics,
     default_dataset_dir,
     evaluate,
-    init_tensorboard,
     load,
     peek_latest_iteration,
     save,
-    seed_all,
+    device_init,
+    tensorboard_init,
     train_epoch,
 )
 from utils.data import MazeWindowDataset, make_dataloader
 from utils.policy import build_policy
-from feishu import send_feishu_train_notification
+from utils.feishu import send_feishu_train_notification
 
 
 class TrainMazeIL:
@@ -45,25 +45,23 @@ class TrainMazeIL:
             return
 
         os.makedirs(f"runs/{self.run_name}", exist_ok=True)
-        self.device = seed_all(
+        self.device = device_init(
             self.args.seed,
             torch_deterministic=self.args.torch_deterministic,
             cuda=self.args.cuda,
         )
 
-        self.writer = init_tensorboard(
+        self.writer = tensorboard_init(
             self.run_name,
             mode="train",
             hparams=vars(self.args),
         )
 
-        dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
+        dataset_dir = REPO_DIR / "dataset" / self.args.dataset_name
         self.dataset = MazeWindowDataset(
             dataset_dir,
             obs_horizon=self.args.obs_horizon,
             pred_horizon=self.args.pred_horizon,
-            sample_stride=self.args.sample_stride,
-            max_samples=self.args.max_train_samples,
             seed=self.args.seed,
         )
         self.loader = make_dataloader(
@@ -82,7 +80,6 @@ class TrainMazeIL:
             self.args.algo,
             self.args.obs_horizon,
             self.args.pred_horizon,
-            self.dataset.map_size,
             STATE_DIM,
             ACTION_DIM,
             device=self.device,
@@ -100,8 +97,7 @@ class TrainMazeIL:
         )
         print(f"[train] run_name={self.run_name} algo={self.args.algo}")
         print(f"[train] obs_horizon={self.args.obs_horizon} "
-              f"pred_horizon={self.args.pred_horizon} "
-              f"act_horizon={self.args.act_horizon}")
+              f"pred_horizon={self.args.pred_horizon} ")
 
     def _resume_if_needed(self):
         latest_json = f"runs/{self.run_name}/latest.json"
@@ -129,7 +125,6 @@ class TrainMazeIL:
             self.eval_episodes,
             device=self.device,
             obs_horizon=self.args.obs_horizon,
-            act_horizon=self.args.act_horizon,
             max_steps=self.dataset.action_horizon,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
@@ -141,26 +136,23 @@ class TrainMazeIL:
 
         success = float(summary["success_rate"])
         succ_steps = float(summary["success_average_steps"])
-        if self.args.save_model:
-            save(
-                self.policy,
-                {
-                    "epoch":
-                    epoch_1based if not is_final else self.args.epochs,
-                    "success_rate": success,
-                    "success_average_steps": succ_steps,
-                    "is_final": is_final,
-                },
-                run_name=self.run_name,
-                algo=self.args.algo,
-                metrics=self.metrics,
-                global_step=self.global_step,
-                act_horizon=self.args.act_horizon,
-                extra={
-                    "goal_tol": self.args.goal_tol,
-                    "max_abs_delta": self.dataset.max_abs_delta
-                },
-            )
+        save(
+            self.policy,
+            {
+                "epoch": epoch_1based if not is_final else self.args.epochs,
+                "success_rate": success,
+                "success_average_steps": succ_steps,
+                "is_final": is_final,
+            },
+            run_name=self.run_name,
+            algo=self.args.algo,
+            metrics=self.metrics,
+            global_step=self.global_step,
+            extra={
+                "goal_tol": self.args.goal_tol,
+                "max_abs_delta": self.dataset.max_abs_delta
+            },
+        )
         print(f"eval_success={success:.4f} "
               f"best_success={self.metrics.best_success_rate:.4f}")
 
@@ -207,16 +199,13 @@ class TrainMazeIL:
         epoch_pbar.close()
         self._eval_and_save(self.args.epochs, is_final=True)
 
-        if self.args.save_model:
-            with open(f"runs/{self.run_name}/latest.json",
-                      "r",
-                      encoding="utf-8") as f:
-                record = json.load(f)
-            record["iteration"] = -1
-            with open(f"runs/{self.run_name}/latest.json",
-                      "w",
-                      encoding="utf-8") as f:
-                json.dump(record, f, indent=2)
+        with open(f"runs/{self.run_name}/latest.json", "r",
+                  encoding="utf-8") as f:
+            record = json.load(f)
+        record["iteration"] = -1
+        with open(f"runs/{self.run_name}/latest.json", "w",
+                  encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
 
         send_feishu_train_notification(
             REPO_DIR,
@@ -226,7 +215,6 @@ class TrainMazeIL:
             epochs=self.args.epochs,
             metrics=self.metrics,
             run_name=self.run_name,
-            enabled=self.args.feishu_notification,
         )
 
         self.close()

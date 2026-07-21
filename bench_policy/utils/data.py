@@ -6,28 +6,12 @@
 # Date  : 2026-07-21
 ################################################################
 
-"""Dataset loader aligned with ``PolicyBase`` batch layout.
-
-Train / update batch (per sample, then collated by DataLoader):
-  map   : (map_size, map_size)
-  state : (obs_horizon, state_dim)
-  action: (pred_horizon, action_dim)
-
-Infer obs (built in closed-loop eval):
-  map   : (map_size, map_size)
-  state : (obs_horizon, state_dim)
-"""
-
-from __future__ import annotations
-
+import torch
+import numpy as np
 from pathlib import Path
 from typing import Optional, Sequence
-
-import numpy as np
-import torch
 from torch.utils.data import DataLoader, Dataset
-
-from utils.common import ACTION_DIM, STATE_DIM, load_dataset_meta
+from utils.common import load_dataset_meta
 
 
 class MazeWindowDataset(Dataset):
@@ -37,9 +21,9 @@ class MazeWindowDataset(Dataset):
         self,
         dataset_dir: Path | str,
         obs_horizon: int = 1,
-        pred_horizon: int = 8,
-        sample_stride: int = 1,
-        max_samples: int = 0,
+        pred_horizon: int = 72,
+        action_dim: int = 2,
+        state_dim: int = 4,
         seed: int = 0,
     ):
         self.dataset_dir = Path(dataset_dir)
@@ -48,18 +32,9 @@ class MazeWindowDataset(Dataset):
         self.config = meta["config"]
         self.obs_horizon = int(obs_horizon)
         self.pred_horizon = int(pred_horizon)
-        self.sample_stride = max(1, int(sample_stride))
-        self.map_size = int(self.config["size"])
-        self.action_horizon = int(self.config["action_horizon"])
+
         self.max_abs_delta = float(self.config["max_abs_delta"])
         self.robot_radius = int(self.config.get("robot_radius", 5))
-        self.state_dim = STATE_DIM
-        self.action_dim = ACTION_DIM
-
-        if self.pred_horizon > self.action_horizon:
-            raise ValueError(
-                f"pred_horizon={self.pred_horizon} > "
-                f"action_horizon={self.action_horizon}")
 
         self._shards: list[dict[str, np.ndarray]] = []
         self._index: list[tuple[int, int, int, int]] = []
@@ -83,7 +58,9 @@ class MazeWindowDataset(Dataset):
 
         if max_samples and max_samples > 0 and max_samples < len(self._index):
             rng = np.random.default_rng(seed)
-            pick = rng.choice(len(self._index), size=max_samples, replace=False)
+            pick = rng.choice(len(self._index),
+                              size=max_samples,
+                              replace=False)
             pick.sort()
             self._index = [self._index[i] for i in pick.tolist()]
 
@@ -136,14 +113,22 @@ class MazeWindowDataset(Dataset):
             for map_i in range(n_maps):
                 for route_i in range(n_routes):
                     episodes.append({
-                        "planning_map": shard["planning_maps"][map_i],
-                        "start_rc": shard["starts_rc"][map_i],
-                        "goal_rc": shard["goals_rc"][map_i],
-                        "waypoints_xy": shard["waypoints_xy"][map_i, route_i],
-                        "action_chunks": shard["action_chunks"][map_i, route_i],
-                        "shard_i": shard_i,
-                        "map_i": map_i,
-                        "route_i": route_i,
+                        "planning_map":
+                        shard["planning_maps"][map_i],
+                        "start_rc":
+                        shard["starts_rc"][map_i],
+                        "goal_rc":
+                        shard["goals_rc"][map_i],
+                        "waypoints_xy":
+                        shard["waypoints_xy"][map_i, route_i],
+                        "action_chunks":
+                        shard["action_chunks"][map_i, route_i],
+                        "shard_i":
+                        shard_i,
+                        "map_i":
+                        map_i,
+                        "route_i":
+                        route_i,
                     })
         if max_episodes and max_episodes > 0 and max_episodes < len(episodes):
             rng = np.random.default_rng(seed)
@@ -188,7 +173,6 @@ def list_dataset_names(
     root = Path(repo_dir) / "dataset"
     if names:
         return list(names)
-    found = sorted(
-        p.name for p in root.iterdir()
-        if p.is_dir() and (p / "manifest.json").is_file())
+    found = sorted(p.name for p in root.iterdir()
+                   if p.is_dir() and (p / "manifest.json").is_file())
     return found

@@ -5,7 +5,6 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-
 """Evaluation entry: ``EvalArgs`` -> dataset + policy -> closed-loop eval."""
 
 from __future__ import annotations
@@ -27,34 +26,32 @@ from utils.common import (
     STATE_DIM,
     default_dataset_dir,
     evaluate,
-    init_tensorboard,
+    tensorboard_init,
     load,
-    seed_all,
+    device_init,
 )
 from utils.data import MazeWindowDataset
 from utils.policy import build_policy
-from feishu import send_feishu_eval_notification
+from utils.feishu import send_feishu_eval_notification
 
 
 class EvalMazeIL:
     """Build dataset + policy from ``EvalArgs`` and run evaluation."""
 
-    def __init__(self, args: EvalArgs):
-        self.args = args.finalize()
-        self.run_name = self.args.run_name
-        assert self.run_name is not None
+    def __init__(self):
+        self.args = tyro.cli(EvalArgs)
+        self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
         # Fixed seed for deterministic episode subsample construction.
-        self.device = seed_all(
+        self.device = device_init(
             0,
             torch_deterministic=self.args.torch_deterministic,
             cuda=self.args.cuda,
         )
-        self.writer = init_tensorboard(
+        self.writer = tensorboard_init(
             self.run_name,
             mode="eval",
             hparams=vars(self.args),
-            enabled=self.args.tensorboard,
         )
 
         dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
@@ -127,14 +124,11 @@ class EvalMazeIL:
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        if self.args.save_result:
-            os.makedirs(f"runs/{self.run_name}", exist_ok=True)
-            result_path = f"runs/{self.run_name}/eval_result.json"
-            with open(result_path, "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
-            print(f"[eval] result saved to {result_path}")
-        else:
-            print("[eval] skip saving eval_result.json")
+        os.makedirs(f"runs/{self.run_name}", exist_ok=True)
+        result_path = f"runs/{self.run_name}/eval_result.json"
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"[eval] result saved to {result_path}")
 
         send_feishu_eval_notification(
             REPO_DIR,
@@ -143,7 +137,6 @@ class EvalMazeIL:
             seed=self.args.seed,
             summary=summary,
             run_name=self.run_name,
-            enabled=self.args.feishu_notification,
         )
         self.writer.close()
         return result

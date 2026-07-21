@@ -6,46 +6,15 @@
 # Date  : 2026-07-21
 ################################################################
 
-"""Shared helpers: seeding, checkpoints, train / eval loops, maze rollout."""
-
-from __future__ import annotations
-
-import gc
-import json
-import os
-import random
-import shutil
+import gc, json, os, random, shutil
 from collections import defaultdict
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Optional, Sequence
+from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import torch
-
-try:
-    from torch.utils.tensorboard import SummaryWriter
-except ModuleNotFoundError:  # optional dependency
-    SummaryWriter = None  # type: ignore[misc, assignment]
-
-ACTION_DIM = 2
-STATE_DIM = 4  # [x, y, goal_x, goal_y] in normalized coords
-
-
-class NullWriter:
-    """No-op stand-in when tensorboard is unavailable or disabled."""
-
-    def add_text(self, *args, **kwargs):
-        return
-
-    def add_scalar(self, *args, **kwargs):
-        return
-
-    def add_hparams(self, *args, **kwargs):
-        return
-
-    def close(self):
-        return
 
 
 @dataclass
@@ -62,9 +31,8 @@ class Metrics:
         return cls(**{k: v for k, v in data.items() if k in valid})
 
 
-def seed_all(
+def device_init(
     seed: int,
-    *,
     torch_deterministic: bool = True,
     cuda: bool = True,
 ) -> torch.device:
@@ -74,11 +42,8 @@ def seed_all(
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = torch_deterministic
     torch.backends.cudnn.benchmark = not torch_deterministic
-    return torch.device("cuda" if torch.cuda.is_available() and cuda else "cpu")
-
-
-def default_dataset_dir(repo_dir: str, dataset_name: str) -> Path:
-    return Path(repo_dir) / "dataset" / dataset_name
+    return torch.device(
+        "cuda" if torch.cuda.is_available() and cuda else "cpu")
 
 
 def load_dataset_meta(dataset_dir: Path) -> dict:
@@ -114,7 +79,8 @@ def copy_best_artifacts(run_name: str, ckpt_name: str):
     dst = f"runs/{run_name}/best_success_ckpt.pt"
     if os.path.abspath(src) != os.path.abspath(dst):
         shutil.copy(src, dst)
-    with open(f"runs/{run_name}/best_success.json", "w", encoding="utf-8") as f:
+    with open(f"runs/{run_name}/best_success.json", "w",
+              encoding="utf-8") as f:
         json.dump({"ckpt_name": os.path.basename(dst)}, f, indent=2)
 
 
@@ -131,9 +97,9 @@ def peek_latest_iteration(run_name: str) -> Optional[int]:
 # TensorBoard init
 # ---------------------------------------------------------------------------
 
-def init_tensorboard(
+
+def tensorboard_init(
     run_name: str,
-    *,
     mode: str = "train",
     hparams: Optional[dict] = None,
 ):
@@ -169,6 +135,7 @@ def init_tensorboard(
 # 1) save  2) load
 # ---------------------------------------------------------------------------
 
+
 def save(
     policy,
     message: dict,
@@ -177,7 +144,6 @@ def save(
     algo: str,
     metrics: Metrics,
     global_step: int = 0,
-    act_horizon: int = 1,
     extra: Optional[dict] = None,
 ) -> str:
     """Save policy weights and related training state under ``runs/{run_name}/``.
@@ -294,6 +260,7 @@ def load(policy, path: str) -> tuple[int, Metrics, dict]:
 # Maze rollout helpers
 # ---------------------------------------------------------------------------
 
+
 def pixel_to_xy(pixel_xy: np.ndarray, size: int) -> np.ndarray:
     return np.asarray(pixel_xy, dtype=np.float64) / float(size - 1)
 
@@ -311,8 +278,8 @@ def is_occupied(planning_map: np.ndarray, pixel_xy: np.ndarray) -> bool:
 
 def goal_error(pixel_xy: np.ndarray, goal_pixel_xy: np.ndarray) -> float:
     """Pixel-space L2 distance to goal."""
-    d = np.asarray(pixel_xy, dtype=np.float64) - np.asarray(
-        goal_pixel_xy, dtype=np.float64)
+    d = np.asarray(pixel_xy, dtype=np.float64) - np.asarray(goal_pixel_xy,
+                                                            dtype=np.float64)
     return float(np.linalg.norm(d))
 
 
@@ -415,28 +382,34 @@ def rollout_episode(
 
 def summarize_rollouts(results: Sequence[dict]) -> dict:
     collided = np.asarray([r["collided"] for r in results], dtype=np.float64)
-    reached = np.asarray([r["reached_goal"] for r in results], dtype=np.float64)
+    reached = np.asarray([r["reached_goal"] for r in results],
+                         dtype=np.float64)
     steps = np.asarray([r["steps"] for r in results], dtype=np.float64)
     errors = np.asarray([r["final_error"] for r in results], dtype=np.float64)
     succ_steps = steps[reached > 0.5]
     mean_steps_success = (float(succ_steps.mean())
                           if len(succ_steps) else float("nan"))
     return {
-        "num_episodes": len(results),
-        "collision_rate": float(collided.mean()) if results else 0.0,
-        "success_rate": float(reached.mean()) if results else 0.0,
-        "mean_steps": float(steps.mean()) if results else 0.0,
-        "mean_steps_success": mean_steps_success,
+        "num_episodes":
+        len(results),
+        "collision_rate":
+        float(collided.mean()) if results else 0.0,
+        "success_rate":
+        float(reached.mean()) if results else 0.0,
+        "mean_steps":
+        float(steps.mean()) if results else 0.0,
+        "mean_steps_success":
+        mean_steps_success,
         "success_average_steps": (mean_steps_success if mean_steps_success
                                   == mean_steps_success else float("inf")),
-        "mean_final_error": float(errors.mean()) if results else 0.0,
+        "mean_final_error":
+        float(errors.mean()) if results else 0.0,
     }
 
 
 # ---------------------------------------------------------------------------
 # 3) eval common  4) train common
 # ---------------------------------------------------------------------------
-
 def evaluate(
     policy,
     episodes: Sequence[dict],

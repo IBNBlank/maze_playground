@@ -20,13 +20,13 @@ class TrainArgs:
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
 
-    # path
-    run_name: Optional[str] = None
-    """resolved run directory name"""
-
     # algo / data
     algo: str = "bc"
     """policy algorithm: bc | act | dp | fm"""
+    state_dim: int = 4
+    """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
+    action_dim: int = 2
+    """action dimension: [dx, dy] in pixels"""
     obs_horizon: int = 1
     """observation history length (waypoint frames)"""
     pred_horizon: int = 72
@@ -55,7 +55,7 @@ class TrainArgs:
 
 @dataclass
 class EvalArgs:
-    # settings
+    # device
     seed: int = 42
     """training seed used to resolve runs/{run_name}/"""
     torch_deterministic: bool = True
@@ -64,14 +64,16 @@ class EvalArgs:
     """if toggled, cuda will be enabled by default"""
 
     # path
-    run_name: Optional[str] = None
-    """resolved run directory name"""
     ckpt_name: str = "best_success_ckpt.pt"
     """checkpoint filename under runs/{run_name}/"""
 
     # algo / data
     algo: str = "bc"
     """policy algorithm: bc | act | dp | fm"""
+    state_dim: int = 4
+    """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
+    action_dim: int = 2
+    """action dimension: [dx, dy] in pixels"""
     obs_horizon: int = 1
     """observation history length (waypoint frames)"""
     pred_horizon: int = 72
