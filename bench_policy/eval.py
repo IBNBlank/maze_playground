@@ -5,7 +5,7 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-"""Evaluation entry: ``EvalArgs`` -> dataset + policy -> closed-loop eval."""
+"""Evaluation entry: ``EvalArgs`` -> dataset + policy -> open-loop eval."""
 
 import json, os, sys, time, tyro
 from pathlib import Path
@@ -33,7 +33,7 @@ class EvalMazeIL:
 
     def __init__(self):
         self.args: EvalArgs = tyro.cli(EvalArgs)
-        self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
+        self.run_name = f"seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
         self.device = device_init(
             0,
@@ -48,13 +48,11 @@ class EvalMazeIL:
 
         dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
         self.dataset = MazeWindowDataset(dataset_dir)
-        self.max_steps = self.dataset.pred_horizon
         self.episodes = build_eval_episodes(
             self.dataset,
             max_episodes=self.args.num_eval,
             seed=self.args.seed,
         )
-
         self.policy = build_policy(
             self.args.algo,
             obs_horizon=1,
@@ -74,7 +72,6 @@ class EvalMazeIL:
             self.policy,
             self.episodes,
             device=self.device,
-            max_steps=self.max_steps,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
             preview_path=(f"runs/{self.run_name}/eval_preview.png"
@@ -82,7 +79,7 @@ class EvalMazeIL:
         )
         eval_time = time.perf_counter() - stime
 
-        log_eval_summary(summary, writer=self.writer, global_step=0)
+        log_eval_summary(summary, writer=self.writer, step=0)
 
         result = {
             "algo": self.args.algo,
@@ -90,15 +87,10 @@ class EvalMazeIL:
             "ckpt_name": self.args.ckpt_name,
             "train_seed": self.args.seed,
             "run_name": self.run_name,
-            "num_episodes": summary.get("num_episodes", len(self.episodes)),
             "eval_time": eval_time,
             "goal_tol": self.args.goal_tol,
-            "max_episode_steps": self.max_steps,
-            "success_rate": summary["success_rate"],
-            "success_average_steps": summary["success_average_steps"],
-            "collision_rate": summary.get("collision_rate"),
-            "metrics": summary,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            **summary,
         }
 
         os.makedirs(f"runs/{self.run_name}", exist_ok=True)

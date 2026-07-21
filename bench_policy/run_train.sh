@@ -14,7 +14,7 @@
 #   DATASET_NAME           : if set, run that single dataset only
 #   MAZE_ALGOS             : space-separated algos (default: bc)
 #   MAZE_SEEDS             : space-separated seeds (default: 42)
-#   EPOCHS                 : training epochs (default: 50)
+#   EPOCHS                 : training epochs (default: 200)
 #   EVAL_FREQ              : eval every N epochs (default: 5)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
@@ -78,6 +78,7 @@ for seed in ${MAZE_SEEDS}; do
 			code=$?
 
 			if [ "${code}" -eq 0 ]; then
+				fails=0
 				echo "[run_train] seed=${seed} dataset=${dataset}" \
 					"algo=${algo}: finished cleanly."
 			elif [ "${code}" -eq 130 ]; then
@@ -98,3 +99,9 @@ for seed in ${MAZE_SEEDS}; do
 done
 
 echo "[run_train] all jobs finished. done."
+
+# shellcheck disable=SC2086
+"${PYTHON}" notify_train.py \
+	--seeds ${MAZE_SEEDS} \
+	--algos "${MAZE_ALGOS[@]}" \
+	--datasets "${DATASETS[@]}"

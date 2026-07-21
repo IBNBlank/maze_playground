@@ -5,24 +5,15 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-"""Feishu (Lark) webhook notifications for maze IL train / eval.
-
-Reads ``{repo_dir}/feishu.json``:
-
-```json
-{
-  "train_webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
-  "eval_webhook_url":  "https://open.feishu.cn/open-apis/bot/v2/hook/..."
-}
-```
-"""
 
 import json
 import os
 import urllib.request
-from typing import Any, Optional, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
-from .common import Metrics
+if TYPE_CHECKING:
+    from .common import Metrics
 
 
 def _load_feishu_config(repo_dir: str) -> Optional[dict]:
@@ -87,14 +78,14 @@ def _post_feishu_card(
         with urllib.request.urlopen(request, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         result = json.loads(body)
-        if result.get("code") == 0:
-            print("[feishu] notification sent")
-            return True
-        print(f"[feishu] notification rejected: {body}")
-        return False
     except Exception as e:
         print(f"[feishu] notification error: {e}")
         return False
+    if result.get("code") == 0:
+        print("[feishu] notification sent")
+        return True
+    print(f"[feishu] notification rejected: {body}")
+    return False
 
 
 def send_feishu_notification(
@@ -107,18 +98,7 @@ def send_feishu_notification(
     template: Optional[str] = None,
     enabled: bool = True,
 ) -> bool:
-    """Push an interactive Feishu card via ``feishu.json`` webhooks.
-
-    Args:
-      repo_dir: repository root containing ``feishu.json``.
-      mode: ``\"train\"`` -> ``train_webhook_url``;
-            ``\"eval\"``  -> ``eval_webhook_url``.
-      title: card title (defaults by mode).
-      markdown: card body markdown.
-      success_rate: optional; picks red/yellow/green template when set.
-      template: explicit Feishu header template override.
-      enabled: if False, no-op.
-    """
+    """Push an interactive Feishu card via ``feishu.json`` webhooks."""
     if not enabled:
         return False
     mode = mode.lower()
@@ -138,10 +118,8 @@ def send_feishu_notification(
         title = ("IL Training Finished"
                  if mode == "train" else "IL Evaluation Finished")
     if template is None:
-        if success_rate is not None:
-            template = _feishu_template_from_success(float(success_rate))
-        else:
-            template = "green"
+        template = (_feishu_template_from_success(float(success_rate))
+                    if success_rate is not None else "green")
 
     return _post_feishu_card(
         webhook_url,
@@ -158,7 +136,7 @@ def send_feishu_train_notification(
     dataset_name: str,
     seed: int,
     epochs: int,
-    metrics: Metrics,
+    metrics: "Metrics",
     run_name: Optional[str] = None,
     enabled: bool = True,
 ) -> bool:
@@ -169,7 +147,8 @@ def send_feishu_train_notification(
         f"- **seed:** {seed}",
         f"- **epochs:** {epochs}",
         f"- **best_success:** {metrics.best_success_rate * 100:.2f}%",
-        f"- **best_success_average_steps:** {metrics.best_success_average_steps:.2f}",
+        f"- **best_success_average_steps:** "
+        f"{metrics.best_success_average_steps:.2f}",
     ]
     if run_name:
         md_lines.insert(0, f"- **run:** {run_name}")
@@ -193,13 +172,11 @@ def send_feishu_eval_notification(
     enabled: bool = True,
 ) -> bool:
     """Notify after one evaluation run finishes."""
-    success = float(summary.get("success_rate", 0.0))
-    succ_steps = float(summary.get("success_average_steps", float("inf")))
-    collision = float(summary.get("collision_rate", 0.0))
-    if succ_steps != succ_steps or succ_steps == float("inf"):
-        steps_text = "n/a"
-    else:
-        steps_text = f"{succ_steps:.2f}"
+    success = float(summary["success_rate"])
+    succ_steps = float(summary["success_average_steps"])
+    collision = float(summary["collision_rate"])
+    steps_text = ("n/a" if succ_steps != succ_steps
+                  or succ_steps == float("inf") else f"{succ_steps:.2f}")
 
     md_lines = [
         f"- **algo:** {algo}",
@@ -231,7 +208,7 @@ def send_feishu_train_sweep_notification(
 ) -> bool:
     """Notify after a full ``run_train.sh`` sweep finishes."""
     if not seeds or not algos or not dataset_names:
-        print("[feishu] empty sweep; nothing to notify")
+        print("[feishu] empty train sweep; nothing to notify")
         return False
     md = (f"- **datasets:** {' '.join(str(d) for d in dataset_names)}\n"
           f"- **seeds:** {' '.join(str(s) for s in seeds)}\n"
@@ -246,6 +223,32 @@ def send_feishu_train_sweep_notification(
     )
 
 
+def mean_eval_success_rate(
+    runs_dir: str | Path,
+    seeds: Sequence[Any],
+    dataset_names: Sequence[str],
+    algos: Sequence[str],
+) -> Optional[float]:
+    """Average ``success_rate`` over existing ``eval_result.json`` files."""
+    rates: list[float] = []
+    root = Path(runs_dir)
+    for seed in seeds:
+        for dataset in dataset_names:
+            for algo in algos:
+                path = root / f"seed{seed}_{dataset}_{algo}" / "eval_result.json"
+                if not path.is_file():
+                    continue
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    rates.append(float(data["success_rate"]))
+                except (OSError, json.JSONDecodeError, KeyError, TypeError,
+                        ValueError):
+                    continue
+    if not rates:
+        return None
+    return float(sum(rates) / len(rates))
+
+
 def send_feishu_eval_sweep_notification(
     repo_dir: str,
     *,
@@ -257,7 +260,7 @@ def send_feishu_eval_sweep_notification(
 ) -> bool:
     """Notify after a full ``run_eval.sh`` sweep finishes."""
     if not seeds or not algos or not dataset_names:
-        print("[feishu] empty sweep; nothing to notify")
+        print("[feishu] empty eval sweep; nothing to notify")
         return False
     md_lines = [
         f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",

@@ -7,14 +7,13 @@
 ################################################################
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
-class TrainArgs:
+class _SharedArgs:
     # device
     seed: int = 42
-    """seed of the experiment"""
+    """seed of the experiment / run_name resolution"""
     torch_deterministic: bool = True
     """if toggled, set cudnn.deterministic=True and cudnn.benchmark=False"""
     cuda: bool = True
@@ -26,15 +25,22 @@ class TrainArgs:
     dataset_name: str = "genplan256_mix"
     """subdir under ../datasets/"""
 
+    # eval knobs shared by train mid-eval and eval.py
+    num_eval: int = 100
+    """number of episodes to evaluate"""
+    goal_tol: float = 1.0
+    """pixel L2 distance threshold for success (error < goal_tol)"""
+
+
+@dataclass
+class TrainArgs(_SharedArgs):
     # train
     epochs: int = 100
     """number of training epochs (= number of idx/epoch_*.npy perms to use)"""
-    batch_size: int = 64
+    batch_size: int = 256
     """samples per training batch (last batch of an epoch may be shorter)"""
     lr: float = 3e-4
     """learning rate"""
-    log_freq: int = 50
-    """tensorboard loss log frequency in steps (0 = epoch end only)"""
 
     # eval
     eval_freq: int = 5
@@ -46,29 +52,11 @@ class TrainArgs:
 
 
 @dataclass
-class EvalArgs:
-    # device
-    seed: int = 42
-    """training seed used to resolve runs/{run_name}/"""
-    torch_deterministic: bool = True
-    """if toggled, set cudnn.deterministic=True and cudnn.benchmark=False"""
-    cuda: bool = True
-    """if toggled, cuda will be enabled by default"""
-
+class EvalArgs(_SharedArgs):
     # path
     ckpt_name: str = "best_success_ckpt.pt"
     """checkpoint filename under runs/{run_name}/"""
 
-    # algo / data
-    algo: str = "bc"
-    """policy algorithm: bc | act | dp | fm"""
-    dataset_name: str = "genplan256_mix"
-    """subdir under ../datasets/"""
-
-    # eval knobs
-    num_eval: int = 100
-    """number of episodes to evaluate"""
-    goal_tol: float = 1.0
-    """pixel L2 distance threshold for success (error < goal_tol)"""
+    # eval
     capture_preview: bool = True
     """save a small collage of rollout overlays under runs/{run_name}/"""

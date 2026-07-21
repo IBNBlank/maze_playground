@@ -3,7 +3,7 @@
 # Batch evaluation wrapper for eval.py (EvalArgs CLI).
 #
 # Nested schedule order: seed -> dataset -> algo. Evaluates each trained
-# policy under runs/Seed{seed}_{dataset_name}_{algo}/.
+# policy under runs/seed{seed}_{dataset_name}_{algo}/.
 #
 # Metrics: collision_rate / success_rate (percent), success_average_steps.
 #
@@ -57,7 +57,7 @@ echo "[run_eval] loop order: seed -> dataset -> algo"
 for seed in ${MAZE_SEEDS}; do
 	for dataset in "${DATASETS[@]}"; do
 		for algo in "${MAZE_ALGOS[@]}"; do
-			run_name="Seed${seed}_${dataset}_${algo}"
+			run_name="seed${seed}_${dataset}_${algo}"
 			ckpt="runs/${run_name}/${MAZE_CKPT_NAME}"
 			echo "######################################################################"
 			echo "[run_eval] === seed=${seed} dataset=${dataset} algo=${algo} ==="
@@ -93,3 +93,9 @@ for seed in ${MAZE_SEEDS}; do
 done
 
 echo "[run_eval] all jobs finished. done."
+
+# shellcheck disable=SC2086
+"${PYTHON}" notify_eval.py \
+	--seeds ${MAZE_SEEDS} \
+	--algos "${MAZE_ALGOS[@]}" \
+	--datasets "${DATASETS[@]}"

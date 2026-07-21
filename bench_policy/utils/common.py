@@ -78,12 +78,11 @@ class Metrics:
 def log_eval_summary(
     summary: dict,
     writer=None,
-    global_step: int = 0,
+    step: int = 0,
     best_rate: float | None = None,
     best_steps: float | None = None,
 ):
     """Print one compact eval line; optionally write TB scalars."""
-    n = summary.get("num_episodes", "-")
     coll = float(summary["collision_rate"]) * 100
     succ = float(summary["success_rate"]) * 100
     steps = float(summary["success_average_steps"])
@@ -99,7 +98,7 @@ def log_eval_summary(
     if writer is not None:
         for k, v in summary.items():
             if isinstance(v, (float, np.floating)):
-                writer.add_scalar(f"eval/{k}", float(v), global_step)
+                writer.add_scalar(f"eval/{k}", float(v), step)
 
 
 def build_eval_episodes(
@@ -189,64 +188,54 @@ def evaluate(
     policy,
     episodes: Sequence[dict],
     device: torch.device,
-    max_steps: int,
     goal_tol: float = 1.0,
     max_abs_delta: float = 5.0,
     preview_path: Optional[str] = None,
     preview_count: int = 16,
 ) -> dict:
-    """Closed-loop eval: infer action chunk, step until hit / goal / budget.
+    """Open-loop eval: one action-chunk inference from start, then step.
 
     If ``preview_path`` is set, also write a collage of the first
     ``preview_count`` rollout overlays.
     """
-    act_horizon = int(policy.pred_horizon)
+    horizon = int(policy.pred_horizon)
     want_preview = preview_path is not None and int(preview_count) > 0
-    results = []
+    results: list[tuple[bool, bool, int]] = []
     preview_tiles: list[np.ndarray] = []
+
     for ep in episodes:
         planning_map = np.asarray(ep["planning_map"])
         size = int(planning_map.shape[0])
         scale = float(size - 1)
-        h, w = planning_map.shape
         cur = np.array(
-            [float(ep["start_rc"][1]),
-             float(ep["start_rc"][0])],
+            [float(ep["start_rc"][1]), float(ep["start_rc"][0])],
             dtype=np.float64,
         )
         goal = np.array(
-            [float(ep["goal_rc"][1]),
-             float(ep["goal_rc"][0])],
+            [float(ep["goal_rc"][1]), float(ep["goal_rc"][0])],
             dtype=np.float64,
         )
-        map_t = torch.from_numpy(planning_map.astype(
-            np.float32)[None]).to(device)
-        steps = 0
-        collided = False
-        reached = False
         record = want_preview and len(preview_tiles) < int(preview_count)
         path = [cur.copy()] if record else None
 
-        while steps < max_steps and not reached and not collided:
-            if float(np.linalg.norm(cur - goal)) < goal_tol:
-                reached = True
-                break
+        steps = 0
+        collided = False
+        reached = float(np.linalg.norm(cur - goal)) < goal_tol
+        if not reached:
             state = np.array(
-                [[
-                    cur[0] / scale, cur[1] / scale, goal[0] / scale,
-                    goal[1] / scale
-                ]],
+                [[cur[0] / scale, cur[1] / scale,
+                  goal[0] / scale, goal[1] / scale]],
                 dtype=np.float32,
             )
             with torch.no_grad():
-                actions = policy.infer_batch({
+                chunk = policy.infer_batch({
                     "map":
-                    map_t,
+                    torch.from_numpy(planning_map.astype(np.float32)[None]).to(
+                        device),
                     "state":
                     torch.from_numpy(state[None]).to(device),
-                })[0].detach().cpu().numpy()
+                })[0].detach().cpu().numpy()[:horizon]
 
-            chunk = actions[:min(act_horizon, max_steps - steps)]
             for ai, a in enumerate(chunk):
                 cur = np.clip(
                     cur +
@@ -258,8 +247,7 @@ def evaluate(
                 if path is not None:
                     path.append(cur.copy())
                 c, r = int(np.rint(cur[0])), int(np.rint(cur[1]))
-                if r < 0 or r >= h or c < 0 or c >= w or planning_map[r,
-                                                                      c] > 0:
+                if planning_map[r, c] > 0:
                     collided = True
                     # finish drawing the rest of this chunk into / through walls
                     if path is not None:
@@ -276,8 +264,6 @@ def evaluate(
                     reached = True
                     break
 
-        if not collided and not reached:
-            reached = float(np.linalg.norm(cur - goal)) < goal_tol
         results.append((collided, reached, steps))
         if path is not None:
             preview_tiles.append(
@@ -328,7 +314,6 @@ def save(
     run_name: str,
     metrics: Metrics,
     iteration: int,
-    global_step: int,
     is_best: bool = False,
 ) -> str:
     """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best."""
@@ -354,7 +339,6 @@ def save(
             {
                 "ckpt_name": ckpt_name,
                 "iteration": int(iteration),
-                "global_step": int(global_step),
                 "metrics": asdict(metrics),
             },
             f,

@@ -147,6 +147,4 @@ class MazeWindowDataset:
             "planning_map": c["map"][local],
             "start_rc": rc[:2],
             "goal_rc": rc[2:],
-            "action_chunks": c["action"][local] * self.max_abs_delta,
-            "sample_i": int(idx),
         }

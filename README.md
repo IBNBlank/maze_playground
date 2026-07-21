@@ -101,7 +101,7 @@ flowchart TD
 ## bench_policy
 
 IL training / evaluation on `datasets/{dataset_name}` (build via `bench_data/`).
-`run_name = Seed{seed}_{dataset_name}_{algo}`.
+`run_name = seed{seed}_{dataset_name}_{algo}`.
 
 ```mermaid
 flowchart TB
@@ -122,15 +122,16 @@ flowchart TB
         train_python --> train_ckpt
         subgraph train_ckpt["ckpts"]
             train_ckpt_mid["runs/{run_name}/ckpt_*.pt"]
-            train_ckpt_latest["runs/{run_name}/latest.pt"]
             train_ckpt_final["runs/{run_name}/final_ckpt.pt"]
             train_ckpt_success["runs/{run_name}/best_success_ckpt.pt"]
         end
 
         train_python --> train_notify
         subgraph train_notify["notify"]
-            train_notify_feishu["feishu"]
+            train_notify_job["send_feishu_train_notification"]
         end
+
+        train_bash --> train_sweep["notify_train.py → sweep"]
     end
 
     train_ckpt --> eval
@@ -142,12 +143,15 @@ flowchart TB
         subgraph eval_log["logs"]
             eval_log_tb["runs/{run_name}/eval/ (tensorboard)"]
             eval_log_result["runs/{run_name}/eval_result.json"]
+            eval_log_preview["runs/{run_name}/eval_preview.png"]
         end
 
         eval_python --> eval_notify
         subgraph eval_notify["notify"]
-            eval_notify_feishu["feishu"]
+            eval_notify_job["send_feishu_eval_notification"]
         end
+
+        eval_bash --> eval_sweep["notify_eval.py → sweep"]
     end
 ```
 
@@ -155,23 +159,27 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    start["tyro.cli TrainArgs"] --> run_name["run_name = Seed{seed}_{dataset}_{algo}"]
+    start["tyro.cli TrainArgs"] --> run_name["run_name = seed{seed}_{dataset}_{algo}"]
     run_name --> early{"latest.json already finished?"}
     early -->|yes| done_early["early exit"]
-    early -->|no| init["device + tensorboard + MazeWindowDataset"]
-    init --> policy["build_policy + optional resume latest.pt"]
-    policy --> loop
+    early -->|no| init["device + TB + MazeWindowDataset + eval_episodes"]
+    init --> policy["build_policy"]
+    policy --> resume{"latest.json exists?"}
+    resume -->|yes| load["load ckpt_name + restore metrics / start_epoch"]
+    resume -->|no| pick["sample epoch_ids from idx/ perms"]
+    load --> pick
+    pick --> loop
 
-    subgraph loop["for epoch in epochs"]
-        set_epoch["dataset.set_epoch(epoch_id)"]
+    subgraph loop["for epoch_idx in epochs"]
+        set_epoch["dataset.set_epoch(epoch_ids[epoch_idx])"]
         set_epoch --> batches["policy.update_batch until epoch done"]
-        batches --> eval_gate{"epoch % eval_freq == 0?"}
-        eval_gate -->|yes| mid_eval["evaluate → save ckpt_*.pt / latest / best"]
+        batches --> eval_gate{"epoch % eval_freq == 0 and not last?"}
+        eval_gate -->|yes| mid_eval["evaluate → ckpt_*.pt + latest.json + best_*"]
         eval_gate -->|no| next_ep["next epoch"]
         mid_eval --> next_ep
     end
 
-    loop --> final_eval["evaluate → final_ckpt.pt + mark iteration=-1"]
+    loop --> final_eval["evaluate → final_ckpt.pt + latest.json iteration=-1"]
     final_eval --> feishu["send_feishu_train_notification"]
     feishu --> done["close writer"]
 ```
@@ -180,14 +188,15 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    start["tyro.cli EvalArgs"] --> run_name["run_name = Seed{seed}_{dataset}_{algo}"]
-    run_name --> init["device + tensorboard eval/ + MazeWindowDataset"]
+    start["tyro.cli EvalArgs"] --> run_name["run_name = seed{seed}_{dataset}_{algo}"]
+    run_name --> init["device + TB eval/ + MazeWindowDataset"]
     init --> episodes["build_eval_episodes(num_eval)"]
     episodes --> policy["build_policy + load runs/{run_name}/{ckpt_name}"]
-    policy --> roll["evaluate closed-loop rollouts"]
+    policy --> roll["evaluate open-loop rollouts"]
     roll --> metrics["success_rate / success_average_steps / collision_rate"]
     metrics --> log["log_eval_summary → tensorboard"]
     log --> json["runs/{run_name}/eval_result.json"]
+    roll -.-> preview["runs/{run_name}/eval_preview.png"]
     json --> feishu["send_feishu_eval_notification"]
     feishu --> done["close writer"]
 ```
