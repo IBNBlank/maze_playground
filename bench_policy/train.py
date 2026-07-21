@@ -6,7 +6,10 @@
 # Date  : 2026-07-21
 ################################################################
 
-import json, os, sys, tyro, tqdm
+import json, os, sys, tyro
+
+import numpy as np
+import tqdm
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,21 +17,25 @@ sys.path.insert(0, REPO_DIR)
 
 from utils.arg import TrainArgs
 from utils.common import (
-    ACTION_DIM,
-    STATE_DIM,
     Metrics,
-    default_dataset_dir,
+    build_eval_episodes,
     evaluate,
     load,
-    peek_latest_iteration,
     save,
     device_init,
     tensorboard_init,
     train_epoch,
+    log_eval_summary,
+    format_eval_metric,
 )
-from utils.data import MazeWindowDataset, make_dataloader
+from utils.data import MazeWindowDataset, default_dataset_dir
 from utils.policy import build_policy
 from utils.feishu import send_feishu_train_notification
+
+
+def _roll_epoch_ids(seed: int, epochs: int, num_idx_perms: int):
+    rng = np.random.default_rng(int(seed))
+    return rng.choice(num_idx_perms, size=epochs, replace=False).astype(np.int64)
 
 
 class TrainMazeIL:
@@ -38,7 +45,11 @@ class TrainMazeIL:
         self.args = tyro.cli(TrainArgs)
         self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
-        recorded = peek_latest_iteration(self.run_name)
+        latest_json = f"runs/{self.run_name}/latest.json"
+        recorded = None
+        if os.path.isfile(latest_json):
+            with open(latest_json, "r", encoding="utf-8") as f:
+                recorded = int(json.load(f).get("iteration", 0))
         self.early_exit = recorded is not None and recorded < 0
         if self.early_exit:
             print(f"[train] recorded iteration={recorded}; already finished.")
@@ -57,33 +68,28 @@ class TrainMazeIL:
             hparams=vars(self.args),
         )
 
-        dataset_dir = REPO_DIR / "dataset" / self.args.dataset_name
-        self.dataset = MazeWindowDataset(
-            dataset_dir,
-            obs_horizon=self.args.obs_horizon,
-            pred_horizon=self.args.pred_horizon,
-            seed=self.args.seed,
-        )
-        self.loader = make_dataloader(
+        self.dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
+        self.dataset = MazeWindowDataset(self.dataset_dir)
+        self.eval_episodes = build_eval_episodes(
             self.dataset,
-            batch_size=self.args.batch_size,
-            num_workers=self.args.num_dataload_workers,
-            shuffle=True,
-            seed=self.args.seed,
-        )
-        self.eval_episodes = self.dataset.iter_eval_episodes(
-            max_episodes=self.args.max_eval_episodes,
+            max_episodes=self.args.num_eval,
             seed=self.args.seed + 1,
         )
 
         self.policy = build_policy(
             self.args.algo,
-            self.args.obs_horizon,
-            self.args.pred_horizon,
-            STATE_DIM,
-            ACTION_DIM,
+            obs_horizon=1,
+            pred_horizon=self.dataset.action_horizon,
+            state_dim=self.args.state_dim,
+            action_dim=self.args.action_dim,
             device=self.device,
             lr=self.args.lr,
+        )
+
+        self.epoch_ids = _roll_epoch_ids(
+            self.args.seed,
+            self.args.epochs,
+            self.dataset.num_idx_perms,
         )
 
         self.metrics = Metrics()
@@ -91,13 +97,13 @@ class TrainMazeIL:
         self.start_epoch = 0
         self._resume_if_needed()
 
-        print(f"[train] dataset={dataset_dir}")
+        print(f"[train] dataset={self.dataset_dir}")
         print(
-            f"[train] windows={len(self.dataset)} maps≈{self.dataset.num_maps}"
+            f"[train] samples={len(self.dataset)} "
+            f"shards={len(self.dataset.shards)}"
         )
         print(f"[train] run_name={self.run_name} algo={self.args.algo}")
-        print(f"[train] obs_horizon={self.args.obs_horizon} "
-              f"pred_horizon={self.args.pred_horizon} ")
+        print(f"[train] action_horizon={self.dataset.action_horizon}")
 
     def _resume_if_needed(self):
         latest_json = f"runs/{self.run_name}/latest.json"
@@ -117,6 +123,22 @@ class TrainMazeIL:
         print(f"[train] resume from epoch index {self.start_epoch} "
               f"(global_step={self.global_step})")
 
+    def _train_epoch(self, epoch_idx: int, epoch_id: int) -> float:
+        last_loss, self.global_step = train_epoch(
+            self.policy,
+            self.dataset,
+            epoch_id=epoch_id,
+            batch_size=self.args.batch_size,
+            device=self.device,
+            global_step=self.global_step,
+            log_freq=int(getattr(self.args, "log_freq", 0) or 0),
+            writer=self.writer,
+            epoch_idx=epoch_idx,
+            num_epochs=self.args.epochs,
+            progress_cls=tqdm.tqdm,
+        )
+        return last_loss
+
     def _eval_and_save(self, epoch_1based: int, is_final: bool = False):
         print(f"[train] evaluating at epoch={epoch_1based}"
               f"{' (final)' if is_final else ''}")
@@ -124,15 +146,13 @@ class TrainMazeIL:
             self.policy,
             self.eval_episodes,
             device=self.device,
-            obs_horizon=self.args.obs_horizon,
+            obs_horizon=1,
+            act_horizon=self.dataset.action_horizon,
             max_steps=self.dataset.action_horizon,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
         )
-        for k, v in summary.items():
-            if isinstance(v, float):
-                self.writer.add_scalar(f"eval/{k}", v, self.global_step)
-                print(f"eval/{k}: {v:.4f}")
+        log_eval_summary(summary, writer=self.writer, global_step=self.global_step)
 
         success = float(summary["success_rate"])
         succ_steps = float(summary["success_average_steps"])
@@ -145,22 +165,24 @@ class TrainMazeIL:
                 "is_final": is_final,
             },
             run_name=self.run_name,
-            algo=self.args.algo,
             metrics=self.metrics,
             global_step=self.global_step,
-            extra={
-                "goal_tol": self.args.goal_tol,
-                "max_abs_delta": self.dataset.max_abs_delta
-            },
         )
-        print(f"eval_success={success:.4f} "
-              f"best_success={self.metrics.best_success_rate:.4f}")
+        print(
+            f"eval_success={format_eval_metric('success_rate', success)} "
+            f"eval_success_steps="
+            f"{format_eval_metric('success_average_steps', succ_steps)} "
+            f"best_success="
+            f"{format_eval_metric('success_rate', self.metrics.best_success_rate)} "
+            f"best_success_steps="
+            f"{format_eval_metric('success_average_steps', self.metrics.best_success_average_steps)}"
+        )
 
     def run(self):
         if self.early_exit:
             return
 
-        epoch_pbar = tqdm(
+        epoch_pbar = tqdm.tqdm(
             range(self.start_epoch, self.args.epochs),
             desc="epoch",
             leave=True,
@@ -169,21 +191,19 @@ class TrainMazeIL:
             total=self.args.epochs,
         )
         for epoch_idx in epoch_pbar:
+            epoch_id = int(self.epoch_ids[epoch_idx])
             epoch_1based = epoch_idx + 1
-            last_loss, self.global_step = train_epoch(
-                self.policy,
-                self.loader,
-                global_step=self.global_step,
-                log_freq=self.args.log_freq,
-                writer=self.writer,
-                epoch_idx=epoch_idx,
-                num_epochs=self.args.epochs,
-                progress_cls=tqdm,
-            )
+            last_loss = self._train_epoch(epoch_idx, epoch_id)
             best = self.metrics.best_success_rate
+            best_steps = self.metrics.best_success_average_steps
             epoch_pbar.set_postfix(
                 loss=f"{last_loss:.4f}" if last_loss == last_loss else "-",
-                best_succ=f"{best:.3f}" if best == best else "-",
+                best_succ=(format_eval_metric("success_rate", best)
+                           if best == best else "-"),
+                best_steps=(format_eval_metric("success_average_steps",
+                                               best_steps)
+                            if best == best else "-"),
+                idx=epoch_id,
             )
 
             if (self.args.eval_freq > 0
@@ -191,9 +211,15 @@ class TrainMazeIL:
                     and epoch_1based < self.args.epochs):
                 self._eval_and_save(epoch_1based, is_final=False)
                 best = self.metrics.best_success_rate
+                best_steps = self.metrics.best_success_average_steps
                 epoch_pbar.set_postfix(
                     loss=f"{last_loss:.4f}" if last_loss == last_loss else "-",
-                    best_succ=f"{best:.3f}" if best == best else "-",
+                    best_succ=(format_eval_metric("success_rate", best)
+                               if best == best else "-"),
+                    best_steps=(format_eval_metric("success_average_steps",
+                                                   best_steps)
+                                if best == best else "-"),
+                    idx=epoch_id,
                 )
 
         epoch_pbar.close()

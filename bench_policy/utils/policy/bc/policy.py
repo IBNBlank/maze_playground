@@ -21,14 +21,12 @@ class BcPolicy(PolicyBase):
         self,
         obs_horizon: int,
         pred_horizon: int,
-        map_size: int,
         state_dim: int,
         action_dim: int,
         device: torch.device | str,
         lr: float,
     ):
-        super().__init__(obs_horizon, pred_horizon, map_size, state_dim,
-                         action_dim)
+        super().__init__(obs_horizon, pred_horizon, state_dim, action_dim)
         self.device = torch.device(device)
         self.lr = float(lr)
 

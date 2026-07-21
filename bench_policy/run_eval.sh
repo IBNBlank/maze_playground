@@ -5,8 +5,7 @@
 # Nested schedule order: seed -> dataset -> algo. Evaluates each trained
 # policy under runs/Seed{seed}_{dataset_name}_{algo}/.
 #
-# Metrics: collision_rate, success_rate (error < goal_tol),
-#          success_average_steps.
+# Metrics: collision_rate / success_rate (percent), success_average_steps.
 #
 # Usage:
 #   ./run_eval.sh
@@ -47,11 +46,7 @@ if [ -n "${DATASET_NAME:-}" ]; then
 	DATASETS=("${DATASET_NAME}")
 else
 	DATASETS=(
-		"genplan256_r2"
-		"genplan256_r3"
-		"genplan256_r4"
-		"genplan256_r5"
-		"genplan256_r6"
+		"genplan256_mix"
 	)
 fi
 

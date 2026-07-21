@@ -43,11 +43,7 @@ if [ -n "${DATASET_NAME:-}" ]; then
 	DATASETS=("${DATASET_NAME}")
 else
 	DATASETS=(
-		"genplan256_r2"
-		"genplan256_r3"
-		"genplan256_r4"
-		"genplan256_r5"
-		"genplan256_r6"
+		"genplan256_mix"
 	)
 fi
 
@@ -57,11 +53,11 @@ echo "[run_train] loop order: seed -> dataset -> algo"
 
 for seed in ${MAZE_SEEDS}; do
 	for dataset in "${DATASETS[@]}"; do
-		DATASET_DIR="${REPO_DIR}/dataset/${dataset}"
+		DATASET_DIR="${REPO_DIR}/datasets/${dataset}"
 
-		if [ ! -f "${DATASET_DIR}/manifest.json" ]; then
-			echo "[run_train] error: missing ${DATASET_DIR}/manifest.json"
-			echo "[run_train] build it first via bench_data/run_gen.sh"
+		if [ ! -f "${DATASET_DIR}/dataset.json" ]; then
+			echo "[run_train] error: missing ${DATASET_DIR}/dataset.json"
+			echo "[run_train] build it first via bench_data/run_set.sh"
 			exit 1
 		fi
 

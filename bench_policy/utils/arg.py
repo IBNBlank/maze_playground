@@ -27,22 +27,18 @@ class TrainArgs:
     """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
     action_dim: int = 2
     """action dimension: [dx, dy] in pixels"""
-    obs_horizon: int = 1
-    """observation history length (waypoint frames)"""
-    pred_horizon: int = 72
-    """predicted action sequence length"""
-    dataset_name: str = "genplan256_r2"
-    """subdir under ../dataset/"""
-    num_dataload_workers: int = 8
-    """torch DataLoader workers"""
+    dataset_name: str = "genplan256_mix"
+    """subdir under ../datasets/"""
 
     # train
     epochs: int = 100
-    """number of training epochs"""
+    """number of training epochs (= number of idx/epoch_*.npy perms to use)"""
     batch_size: int = 64
-    """dataloader batch size"""
+    """samples per training batch (last batch of an epoch may be shorter)"""
     lr: float = 3e-4
     """learning rate"""
+    log_freq: int = 50
+    """tensorboard loss log frequency in steps (0 = epoch end only)"""
 
     # eval
     eval_freq: int = 5
@@ -74,12 +70,8 @@ class EvalArgs:
     """state dimension: [x, y, goal_x, goal_y] in normalized coords"""
     action_dim: int = 2
     """action dimension: [dx, dy] in pixels"""
-    obs_horizon: int = 1
-    """observation history length (waypoint frames)"""
-    pred_horizon: int = 72
-    """predicted action sequence length"""
-    dataset_name: str = "genplan256_r2"
-    """subdir under ../dataset/"""
+    dataset_name: str = "genplan256_mix"
+    """subdir under ../datasets/"""
 
     # eval knobs
     num_eval: int = 100

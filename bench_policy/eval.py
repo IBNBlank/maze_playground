@@ -22,15 +22,14 @@ sys.path.insert(0, REPO_DIR)
 
 from utils.arg import EvalArgs
 from utils.common import (
-    ACTION_DIM,
-    STATE_DIM,
-    default_dataset_dir,
+    build_eval_episodes,
     evaluate,
     tensorboard_init,
     load,
     device_init,
+    log_eval_summary,
 )
-from utils.data import MazeWindowDataset
+from utils.data import MazeWindowDataset, default_dataset_dir
 from utils.policy import build_policy
 from utils.feishu import send_feishu_eval_notification
 
@@ -42,7 +41,6 @@ class EvalMazeIL:
         self.args = tyro.cli(EvalArgs)
         self.run_name = f"Seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
 
-        # Fixed seed for deterministic episode subsample construction.
         self.device = device_init(
             0,
             torch_deterministic=self.args.torch_deterministic,
@@ -55,30 +53,22 @@ class EvalMazeIL:
         )
 
         dataset_dir = default_dataset_dir(REPO_DIR, self.args.dataset_name)
-        self.dataset = MazeWindowDataset(
-            dataset_dir,
-            obs_horizon=self.args.obs_horizon,
-            pred_horizon=self.args.pred_horizon,
-            sample_stride=self.args.sample_stride,
-            max_samples=1,
-            seed=0,
-        )
-        self.max_steps = (self.args.max_episode_steps
-                          or self.dataset.action_horizon)
-        self.episodes = self.dataset.iter_eval_episodes(
+        self.dataset = MazeWindowDataset(dataset_dir)
+        self.max_steps = self.dataset.action_horizon
+        self.episodes = build_eval_episodes(
+            self.dataset,
             max_episodes=self.args.num_eval,
             seed=self.args.seed,
         )
 
         self.policy = build_policy(
             self.args.algo,
-            self.args.obs_horizon,
-            self.args.pred_horizon,
-            self.dataset.map_size,
-            STATE_DIM,
-            ACTION_DIM,
+            obs_horizon=1,
+            pred_horizon=self.dataset.action_horizon,
+            state_dim=self.args.state_dim,
+            action_dim=self.args.action_dim,
             device=self.device,
-            lr=self.args.lr,
+            lr=3e-4,
         )
         load(self.policy, f"runs/{self.run_name}/{self.args.ckpt_name}")
 
@@ -90,20 +80,15 @@ class EvalMazeIL:
             self.policy,
             self.episodes,
             device=self.device,
-            obs_horizon=self.args.obs_horizon,
-            act_horizon=self.args.act_horizon,
+            obs_horizon=1,
+            act_horizon=self.dataset.action_horizon,
             max_steps=self.max_steps,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
         )
         eval_time = time.perf_counter() - stime
 
-        for k, v in summary.items():
-            if isinstance(v, float):
-                print(f"eval_{k}: {v:.4f}")
-                self.writer.add_scalar(f"eval/{k}", v, 0)
-            else:
-                print(f"eval_{k}: {v}")
+        log_eval_summary(summary, writer=self.writer, global_step=0)
 
         result = {
             "algo": self.args.algo,
@@ -118,8 +103,6 @@ class EvalMazeIL:
             "success_rate": summary["success_rate"],
             "success_average_steps": summary["success_average_steps"],
             "collision_rate": summary.get("collision_rate"),
-            "mean_steps": summary.get("mean_steps"),
-            "mean_final_error": summary.get("mean_final_error"),
             "metrics": summary,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }

@@ -19,6 +19,9 @@ Shards of SHARD_SIZE samples are written under
 plus dataset.json and NUM_IDX_PERMS shuffled full-index permutations as
   {out_dir}/idx/epoch_XXX.npy
 so training can pick epochs by seed without DataLoader shuffle state.
+Each epoch file is a full-index permutation; training loads all shards,
+reorders by that perm, and yields batches sequentially (last batch may
+be shorter).
 """
 
 import json
