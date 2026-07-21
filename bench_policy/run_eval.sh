@@ -13,7 +13,7 @@
 #   DATASET_NAME=genplan256_r4 MAZE_ALGOS="bc" MAZE_SEEDS="42" ./run_eval.sh
 #
 # Tunables (env vars):
-#   PYTHON                 : python interpreter (default: repo .venv)
+#   PYTHON                 : python interpreter (default: active venv, else repo .venv)
 #   DATASET_NAME           : if set, run that single dataset only
 #   MAZE_ALGOS             : space-separated algos (default: bc)
 #   MAZE_SEEDS             : space-separated training seeds (default: 42)
@@ -28,9 +28,12 @@ set -u
 cd "$(dirname "$0")" || exit 1
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PYTHON="${PYTHON:-${REPO_DIR}/.venv/bin/python}"
-if [ ! -x "${PYTHON}" ]; then
-	PYTHON="python"
+if [ -n "${PYTHON:-}" ]; then
+	:
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+	PYTHON="${VIRTUAL_ENV}/bin/python"
+else
+	PYTHON="${REPO_DIR}/.venv/bin/python"
 fi
 
 read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc}"

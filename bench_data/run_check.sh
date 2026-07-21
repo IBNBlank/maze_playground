@@ -14,7 +14,7 @@
 # (--dataset-dir) are applied last and win.
 #
 # Tunables (env vars):
-#   PYTHON           : python interpreter (default: repo .venv)
+#   PYTHON           : python interpreter (default: active venv, else repo .venv)
 #   SIZE             : map side length used in dataset name (default: 256)
 #   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
 #   DATASET_DIR      : dataset base dir (default: ../dataset/genplan${SIZE});
@@ -25,7 +25,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")" || exit 1
 
-PYTHON="${PYTHON:-../.venv/bin/python}"
+if [ -n "${PYTHON:-}" ]; then
+	:
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+	PYTHON="${VIRTUAL_ENV}/bin/python"
+else
+	PYTHON="../.venv/bin/python"
+fi
 SIZE="${SIZE:-256}"
 NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4 5 6}"
 DATASET_DIR="${DATASET_DIR:-../dataset/genplan${SIZE}}"

@@ -14,7 +14,7 @@
 # (--num-routes, --seed, --output-dir) are applied last and win.
 #
 # Tunables (env vars):
-#   PYTHON           : python interpreter (default: repo .venv)
+#   PYTHON           : python interpreter (default: active venv, else repo .venv)
 #   NUM_MAPS         : number of maps (default: 1000)
 #   SIZE             : map side length (default: 256)
 #   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
@@ -30,12 +30,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")" || exit 1
 
-PYTHON="${PYTHON:-../.venv/bin/python}"
+if [ -n "${PYTHON:-}" ]; then
+	:
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+	PYTHON="${VIRTUAL_ENV}/bin/python"
+else
+	PYTHON="../.venv/bin/python"
+fi
 NUM_MAPS="${NUM_MAPS:-500}"
 SIZE="${SIZE:-256}"
-NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4 5 6}"
+NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4}"
 ACTION_HORIZON="${ACTION_HORIZON:-72}"
-OUTPUT_DIR="${OUTPUT_DIR:-../dataset/genplan${SIZE}}"
+OUTPUT_DIR="${OUTPUT_DIR:-../demon/genplan${SIZE}}"
 SHARD_SIZE="${SHARD_SIZE:-100}"
 ROBOT_RADIUS="${ROBOT_RADIUS:-5}"
 PREVIEW_COUNT="${PREVIEW_COUNT:-16}"
