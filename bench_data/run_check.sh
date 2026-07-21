@@ -17,7 +17,7 @@
 #   PYTHON           : python interpreter (default: active venv, else repo .venv)
 #   SIZE             : map side length used in dataset name (default: 256)
 #   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
-#   DATASET_DIR      : dataset base dir (default: ../dataset/genplan${SIZE});
+#   DATASET_DIR      : dataset base dir (default: ../demons/genplan${SIZE});
 #                      each run uses ${DATASET_DIR}_r${num_routes}
 #   PREVIEW_COUNT    : number of leading maps to visualize (default: 16)
 ###############################################################################
@@ -33,8 +33,8 @@ else
 	PYTHON="../.venv/bin/python"
 fi
 SIZE="${SIZE:-256}"
-NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4 5 6}"
-DATASET_DIR="${DATASET_DIR:-../dataset/genplan${SIZE}}"
+NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4}"
+DATASET_DIR="${DATASET_DIR:-../demons/genplan${SIZE}}"
 PREVIEW_COUNT="${PREVIEW_COUNT:-16}"
 
 if [ ! -x "${PYTHON}" ] && ! command -v "${PYTHON}" >/dev/null 2>&1; then

@@ -85,6 +85,23 @@ class CheckArgs:
     output: Path | None = None
 
 
+@dataclass
+class SetArgs:
+    """Flatten multimodal demons into map / state / action_chunk shards."""
+
+    # Subdir names under demons_root (like env ids in the ManiSkill pipeline).
+    demons_ids: tuple[str, ...] = ("genplan256_r2",)
+    demons_root: Path = Path("../demons")
+    dataset_name: str = "genplan256_r2"
+    # Default: ../datasets/{dataset_name}
+    out_dir: Path | None = None
+    shard_size: int = 2048
+    num_idx_perms: int = 300
+    idx_perm_seed: int = 0
+    # Validate action_chunks length; 0 skips the check.
+    action_horizon: int = 72
+
+
 def args_init() -> Args:
     args = tyro.cli(Args)
     if args.num_maps <= 0:

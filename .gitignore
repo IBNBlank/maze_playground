@@ -225,5 +225,5 @@ __marimo__/
 *.h5
 !task/my_cabinet*/**
 demons/**
-dataset/**
+datasets/**
 feishu.json
