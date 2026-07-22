@@ -242,7 +242,7 @@ def mean_eval_success_rate(
             for algo in algos:
                 run = make_run_name(
                     seed, dataset, algo, use_class=use_class)
-                path = root / run / "eval_result.json"
+                path = root / run / "eval" / "eval_result.json"
                 if not path.is_file():
                     continue
                 try:

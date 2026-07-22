@@ -32,7 +32,7 @@ class NotifyEvalArgs:
     use_class: bool = False
     """match train/eval --use-class run dirs (priv_*)"""
     runs_dir: str = "runs"
-    """directory containing [priv_]seed{seed}_{dataset}_{algo}/eval_result.json"""
+    """directory containing [priv_]seed{seed}_{dataset}_{algo}/eval/eval_result.json"""
 
 
 def main():

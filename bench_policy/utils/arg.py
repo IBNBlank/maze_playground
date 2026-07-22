@@ -29,7 +29,7 @@ class _SharedArgs:
 
     # eval knobs shared by train mid-eval and eval.py
     num_eval: int = 100
-    """number of episodes to evaluate"""
+    """episodes to evaluate; 0 = all samples (one full epoch)"""
     goal_tol: float = 1.0
     """pixel L2 distance threshold for success (error < goal_tol)"""
 
@@ -45,8 +45,6 @@ class TrainArgs(_SharedArgs):
     # eval
     eval_freq: int = 5
     """evaluation frequency in epochs (0 = only final)"""
-    num_eval: int = 100
-    """number of episodes to evaluate"""
     goal_tol: float = 1.0
     """pixel L2 distance threshold for success (error < goal_tol)"""
 
@@ -59,4 +57,4 @@ class EvalArgs(_SharedArgs):
 
     # eval
     capture_preview: bool = True
-    """save a small collage of rollout overlays under runs/{run_name}/"""
+    """save a small collage of rollout overlays under runs/{run_name}/eval/"""

@@ -16,6 +16,9 @@
 #   MAZE_SEEDS             : space-separated seeds (default: 42)
 #   EPOCHS                 : training epochs (default: 200)
 #   EVAL_FREQ              : eval every N epochs (default: 5)
+#   NUM_EVAL_EPISODES      : mid-train eval episodes; 0 = full epoch
+#                            (default: 1000)
+#   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
 #   USE_CLASS              : 1/true to enable route-cond class (default: 0)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
@@ -37,7 +40,9 @@ read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act}"
 MAZE_SEEDS="${MAZE_SEEDS:-42}"
 EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"
-USE_CLASS="${USE_CLASS:-1}"
+NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-500}"
+GOAL_TOL="${GOAL_TOL:-2.0}"
+USE_CLASS="${USE_CLASS:-0}"
 MAX_CONSECUTIVE_FAILS="${MAX_CONSECUTIVE_FAILS:-5}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
@@ -82,6 +87,8 @@ for seed in ${MAZE_SEEDS}; do
 				--seed "${seed}" \
 				--epochs "${EPOCHS}" \
 				--eval-freq "${EVAL_FREQ}" \
+				--num-eval "${NUM_EVAL_EPISODES}" \
+				--goal-tol "${GOAL_TOL}" \
 				${USE_CLASS_FLAG} \
 				${EXTRA_ARGS}
 			code=$?

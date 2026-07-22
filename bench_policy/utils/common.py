@@ -9,6 +9,7 @@
 import json, math, os, random, shutil
 import cv2
 import torch
+import tqdm
 import numpy as np
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -229,8 +230,16 @@ def evaluate(
     results: list[tuple[bool, bool, int]] = []
     preview_tiles: list[np.ndarray] = []
     robot_radius = int(robot_radius)
+    n_coll = 0
+    n_succ = 0
 
-    for ep in episodes:
+    pbar = tqdm.tqdm(
+        episodes,
+        desc="eval",
+        leave=True,
+        dynamic_ncols=True,
+    )
+    for ep in pbar:
         # Dataset ``map`` is raw occupancy; inflate for robot footprint.
         occupancy = np.asarray(ep["planning_map"])
         collision_map = inflate_occupancy(occupancy, robot_radius)
@@ -299,6 +308,8 @@ def evaluate(
                     break
 
         results.append((collided, reached, steps))
+        n_coll += int(collided)
+        n_succ += int(reached)
         if path is not None:
             preview_tiles.append(
                 _render_rollout_tile(
@@ -309,6 +320,12 @@ def evaluate(
                     collided=collided,
                     reached=reached,
                 ))
+        n = len(results)
+        pbar.set_postfix(
+            coll=f"{n_coll / n:.0%}",
+            succ=f"{n_succ / n:.0%}",
+            refresh=False,
+        )
 
     if want_preview:
         save_eval_preview(preview_tiles, preview_path)

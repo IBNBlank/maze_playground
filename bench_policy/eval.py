@@ -18,7 +18,6 @@ from utils.arg import EvalArgs
 from utils.common import (
     build_eval_episodes,
     evaluate,
-    tensorboard_init,
     load,
     device_init,
     log_eval_summary,
@@ -45,11 +44,6 @@ class EvalMazeIL:
             0,
             torch_deterministic=self.args.torch_deterministic,
             cuda=self.args.cuda,
-        )
-        self.writer = tensorboard_init(
-            self.run_name,
-            mode="eval",
-            hparams=vars(self.args),
         )
 
         dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
@@ -83,12 +77,12 @@ class EvalMazeIL:
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
             robot_radius=self.dataset.robot_radius,
-            preview_path=(f"runs/{self.run_name}/eval_preview.png"
+            preview_path=(f"runs/{self.run_name}/eval/eval_preview.png"
                           if self.args.capture_preview else None),
         )
         eval_time = time.perf_counter() - stime
 
-        log_eval_summary(summary, writer=self.writer, step=0)
+        log_eval_summary(summary)
 
         result = {
             "algo": self.args.algo,
@@ -103,8 +97,9 @@ class EvalMazeIL:
             **summary,
         }
 
-        os.makedirs(f"runs/{self.run_name}", exist_ok=True)
-        result_path = f"runs/{self.run_name}/eval_result.json"
+        eval_dir = f"runs/{self.run_name}/eval"
+        os.makedirs(eval_dir, exist_ok=True)
+        result_path = f"{eval_dir}/eval_result.json"
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         print(f"[eval] result saved to {result_path}")
@@ -117,7 +112,6 @@ class EvalMazeIL:
             summary=summary,
             run_name=self.run_name,
         )
-        self.writer.close()
         return result
 
 
