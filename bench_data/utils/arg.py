@@ -87,7 +87,7 @@ class CheckArgs:
 
 @dataclass
 class SetArgs:
-    """Flatten multimodal demons into map / state / action_chunk shards."""
+    """Flatten multimodal demons into map / state / action_chunk / class shards."""
 
     # Subdir names under demons_root (like env ids in the ManiSkill pipeline).
     demons_ids: tuple[str, ...] = ("genplan256_r2",)

@@ -61,9 +61,8 @@ def build_policy(
     state_dim: int,
     action_dim: int,
     device,
-    lr: float,
 ) -> PolicyBase:
-    """Construct a policy for ``algo``."""
+    """Construct a policy for ``algo`` (each algo picks its own lr)."""
     algo = algo.lower()
     if algo == "bc":
         from .bc.policy import BcPolicy
@@ -73,18 +72,22 @@ def build_policy(
             state_dim,
             action_dim,
             device=device,
-            lr=lr,
         )
-    # elif algo == "act":
-    #     from .act.policy import ActPolicy
-    #     return ActPolicy(obs_horizon, pred_horizon, map_size, state_dim,
-    #                     action_dim, device=device, lr=lr)
+    if algo == "act":
+        from .act.policy import ActPolicy
+        return ActPolicy(
+            obs_horizon,
+            pred_horizon,
+            state_dim,
+            action_dim,
+            device=device,
+        )
     # elif algo == "dp":
     #     from .dp.policy import DpPolicy
-    #     return DpPolicy(obs_horizon, pred_horizon, map_size, state_dim,
-    #                    action_dim, device=device, lr=lr)
+    #     return DpPolicy(obs_horizon, pred_horizon, state_dim,
+    #                    action_dim, device=device)
     # elif algo == "fm":
     #     from .fm.policy import FmPolicy
-    #     return FmPolicy(obs_horizon, pred_horizon, map_size, state_dim,
-    #                    action_dim, device=device, lr=lr)
+    #     return FmPolicy(obs_horizon, pred_horizon, state_dim,
+    #                    action_dim, device=device)
     raise ValueError(f"Unknown algo={algo}")

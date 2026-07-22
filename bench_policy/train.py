@@ -25,6 +25,7 @@ from utils.common import (
     load,
     save,
     device_init,
+    make_run_name,
     tensorboard_init,
     log_eval_summary,
 )
@@ -38,7 +39,12 @@ class TrainMazeIL:
 
     def __init__(self):
         self.args: TrainArgs = tyro.cli(TrainArgs)
-        self.run_name = f"seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
+        self.run_name = make_run_name(
+            self.args.seed,
+            self.args.dataset_name,
+            self.args.algo,
+            use_class=self.args.use_class,
+        )
         self.early_exit = False
 
         latest = self._read_latest()
@@ -61,7 +67,10 @@ class TrainMazeIL:
         )
 
         self.dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
-        self.dataset = MazeWindowDataset(self.dataset_dir)
+        self.dataset = MazeWindowDataset(
+            self.dataset_dir,
+            use_class=self.args.use_class,
+        )
         self.eval_episodes = build_eval_episodes(
             self.dataset,
             max_episodes=self.args.num_eval,
@@ -74,7 +83,6 @@ class TrainMazeIL:
             state_dim=self.dataset.state_dim,
             action_dim=self.dataset.action_dim,
             device=self.device,
-            lr=self.args.lr,
         )
 
         rng = np.random.default_rng(int(self.args.seed))
@@ -91,8 +99,10 @@ class TrainMazeIL:
         print(f"[train] dataset={self.dataset_dir}")
         print(f"[train] samples={len(self.dataset)} "
               f"shards={len(self.dataset.shards)}")
-        print(f"[train] run_name={self.run_name} algo={self.args.algo}")
-        print(f"[train] pred_horizon={self.dataset.pred_horizon}")
+        print(f"[train] run_name={self.run_name} algo={self.args.algo} "
+              f"use_class={self.args.use_class}")
+        print(f"[train] pred_horizon={self.dataset.pred_horizon} "
+              f"state_dim={self.dataset.state_dim}")
 
     def _read_latest(self) -> dict | None:
         path = f"runs/{self.run_name}/latest.json"
@@ -165,6 +175,7 @@ class TrainMazeIL:
             device=self.device,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
+            robot_radius=self.dataset.robot_radius,
         )
 
         success = float(summary["success_rate"])

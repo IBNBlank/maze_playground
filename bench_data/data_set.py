@@ -12,6 +12,7 @@ Each expert route becomes one sample:
   map          : (H, W) uint8 occupancy
   state        : (4,) float32 = [start_r, start_c, goal_r, goal_c]
   action_chunk : (72, 2) float32 pixel-space (dx, dy)
+  class        : () int16 route-cond id (0 = topmost L→R corridor)
 
 One or more demons/{id} trees may be merged into a single named dataset.
 Shards of SHARD_SIZE samples are written under
@@ -19,9 +20,8 @@ Shards of SHARD_SIZE samples are written under
 plus dataset.json and NUM_IDX_PERMS shuffled full-index permutations as
   {out_dir}/idx/epoch_XXX.npy
 so training can pick epochs by seed without DataLoader shuffle state.
-Each epoch file is a full-index permutation; training loads all shards,
-reorders by that perm, and yields batches sequentially (last batch may
-be shorter).
+Each epoch file is a full-index permutation; training streams batches by
+that index order (shards cached on demand; last batch may be shorter).
 """
 
 import json
@@ -91,6 +91,7 @@ def _flush_shard(
         map=np.stack(buf["map"], axis=0),
         state=np.stack(buf["state"], axis=0),
         action_chunk=np.stack(buf["action_chunk"], axis=0),
+        **{"class": np.stack(buf["class"], axis=0)},
     )
     return {"path": name, "num_samples": n}
 
@@ -130,7 +131,7 @@ def _iter_route_samples(
     action_horizon: int,
     demons_id: str,
 ):
-    """Yield (map, state, action_chunk) for every route in every map."""
+    """Yield map/state/action_chunk/class for every route in every map."""
     map_id = 0
     for shard_name in shard_names:
         shard_path = demons_dir / shard_name
@@ -141,6 +142,11 @@ def _iter_route_samples(
             starts = shard["starts_rc"]
             goals = shard["goals_rc"]
             actions = shard["action_chunks"]
+            # Prefer stored top→bottom labels; fall back to route index.
+            if "route_classes" in shard.files:
+                route_classes = np.asarray(shard["route_classes"])
+            else:
+                route_classes = None
             batch, num_routes = int(actions.shape[0]), int(actions.shape[1])
             horizon = int(actions.shape[2])
             if action_horizon > 0 and horizon != action_horizon:
@@ -157,11 +163,16 @@ def _iter_route_samples(
                 )
                 occ = np.asarray(maps[i], dtype=np.uint8)
                 for r in range(num_routes):
+                    if route_classes is not None:
+                        cls = int(route_classes[i, r])
+                    else:
+                        cls = r
                     yield {
                         "map": occ,
                         "state": state,
                         "action_chunk": np.asarray(actions[i, r],
                                                    dtype=np.float32),
+                        "class": np.asarray(cls, dtype=np.int16),
                         "map_id": map_id,
                         "route_id": r,
                         "demons_id": demons_id,
@@ -227,6 +238,7 @@ def gen_dataset(args: SetArgs) -> dict:
         "map": [],
         "state": [],
         "action_chunk": [],
+        "class": [],
     }
     shards: List[dict] = []
     shard_idx = 0
@@ -236,6 +248,7 @@ def gen_dataset(args: SetArgs) -> dict:
     per_source_maps: Dict[str, int] = {}
     map_shape = None
     action_dim = None
+    num_classes = 0
     action_encoding = sources[0]["manifest"].get("action_encoding", {})
 
     for src in sources:
@@ -255,10 +268,12 @@ def gen_dataset(args: SetArgs) -> dict:
             if sample["route_id"] == 0:
                 total_maps += 1
                 per_source_maps[demons_id] += 1
+            num_classes = max(num_classes, int(sample["class"]) + 1)
 
             buf["map"].append(sample["map"])
             buf["state"].append(sample["state"])
             buf["action_chunk"].append(sample["action_chunk"])
+            buf["class"].append(sample["class"])
             total_samples += 1
             per_source_counts[demons_id] += 1
 
@@ -291,7 +306,7 @@ def gen_dataset(args: SetArgs) -> dict:
             sources[0]["config"].get("action_horizon", args.action_horizon),
         ))
     summary = {
-        "format": "genplan-flat-route-v1",
+        "format": "genplan-flat-route-v2",
         "dataset_name": dataset_name,
         "demons_ids": used_ids,
         "demons_root": str(demons_root),
@@ -307,6 +322,8 @@ def gen_dataset(args: SetArgs) -> dict:
         "state_layout": ["start_r", "start_c", "goal_r", "goal_c"],
         "action_horizon": action_horizon,
         "action_dim": action_dim,
+        "num_classes": num_classes,
+        "class_layout": "route-cond; 0 = uppermost left→right corridor",
         "shards": shards,
         "num_idx_perms": len(idx_paths),
         "idx_perm_seed": args.idx_perm_seed,

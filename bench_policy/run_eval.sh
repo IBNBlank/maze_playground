@@ -20,6 +20,7 @@
 #                            (default: best_success_ckpt.pt)
 #   NUM_EVAL_EPISODES      : episodes per job (default: 100)
 #   GOAL_TOL               : pixel L2 success threshold (default: 1.0)
+#   USE_CLASS              : 1/true to enable route-cond class (default: 0)
 #   EXTRA_ARGS             : extra CLI args forwarded to eval.py
 ###############################################################################
 set -u
@@ -35,32 +36,44 @@ else
 	PYTHON="${REPO_DIR}/.venv/bin/python"
 fi
 
-read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc}"
+read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act}"
 MAZE_SEEDS="${MAZE_SEEDS:-42}"
 MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-best_success_ckpt.pt}"
+# MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-final_ckpt.pt}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-100}"
 GOAL_TOL="${GOAL_TOL:-1.0}"
+USE_CLASS="${USE_CLASS:-1}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+
+case "${USE_CLASS,,}" in
+	1|true|yes|on) USE_CLASS_FLAG="--use-class" ;;
+	*) USE_CLASS_FLAG="--no-use-class" ;;
+esac
 
 if [ -n "${DATASET_NAME:-}" ]; then
 	DATASETS=("${DATASET_NAME}")
 else
 	DATASETS=(
-		"genplan256_mix"
+		# "genplan256_mix"
+		"genplan256_r2"
 	)
 fi
 
 echo "[run_eval] datasets=${#DATASETS[@]} algos=${MAZE_ALGOS[*]} seeds=${MAZE_SEEDS}"
-echo "[run_eval] ckpt=${MAZE_CKPT_NAME} episodes=${NUM_EVAL_EPISODES} goal_tol=${GOAL_TOL}"
+echo "[run_eval] ckpt=${MAZE_CKPT_NAME} episodes=${NUM_EVAL_EPISODES} goal_tol=${GOAL_TOL} use_class=${USE_CLASS}"
 echo "[run_eval] loop order: seed -> dataset -> algo"
 
 for seed in ${MAZE_SEEDS}; do
 	for dataset in "${DATASETS[@]}"; do
 		for algo in "${MAZE_ALGOS[@]}"; do
-			run_name="seed${seed}_${dataset}_${algo}"
+			if [[ "${USE_CLASS,,}" =~ ^(1|true|yes|on)$ ]]; then
+				run_name="priv_seed${seed}_${dataset}_${algo}"
+			else
+				run_name="seed${seed}_${dataset}_${algo}"
+			fi
 			ckpt="runs/${run_name}/${MAZE_CKPT_NAME}"
 			echo "######################################################################"
-			echo "[run_eval] === seed=${seed} dataset=${dataset} algo=${algo} ==="
+			echo "[run_eval] === seed=${seed} dataset=${dataset} algo=${algo} use_class=${USE_CLASS} ==="
 			echo "######################################################################"
 			if [ ! -f "${ckpt}" ]; then
 				echo "[run_eval] skip: ckpt not found: ${ckpt}"
@@ -75,6 +88,7 @@ for seed in ${MAZE_SEEDS}; do
 				--ckpt-name "${MAZE_CKPT_NAME}" \
 				--num-eval "${NUM_EVAL_EPISODES}" \
 				--goal-tol "${GOAL_TOL}" \
+				${USE_CLASS_FLAG} \
 				${EXTRA_ARGS}
 			code=$?
 
@@ -98,4 +112,5 @@ echo "[run_eval] all jobs finished. done."
 "${PYTHON}" notify_eval.py \
 	--seeds ${MAZE_SEEDS} \
 	--algos "${MAZE_ALGOS[@]}" \
-	--datasets "${DATASETS[@]}"
+	--datasets "${DATASETS[@]}" \
+	${USE_CLASS_FLAG}

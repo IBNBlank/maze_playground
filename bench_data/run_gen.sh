@@ -37,9 +37,9 @@ elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
 else
 	PYTHON="../.venv/bin/python"
 fi
-NUM_MAPS="${NUM_MAPS:-500}"
+NUM_MAPS="${NUM_MAPS:-5000}"
 SIZE="${SIZE:-256}"
-NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2 3 4}"
+NUM_ROUTES_LIST="${NUM_ROUTES_LIST:-2}"
 ACTION_HORIZON="${ACTION_HORIZON:-72}"
 OUTPUT_DIR="${OUTPUT_DIR:-../demons/genplan${SIZE}}"
 SHARD_SIZE="${SHARD_SIZE:-100}"

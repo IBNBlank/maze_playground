@@ -15,7 +15,9 @@ from utils.policy.policy import PolicyBase
 
 
 class BcPolicy(PolicyBase):
-    """MSE behavior cloning."""
+    """MSE behavior cloning with DETR action queries (latent z fixed to 0)."""
+
+    lr: float = 3e-4
 
     def __init__(
         self,
@@ -24,11 +26,9 @@ class BcPolicy(PolicyBase):
         state_dim: int,
         action_dim: int,
         device: torch.device | str,
-        lr: float,
     ):
         super().__init__(obs_horizon, pred_horizon, state_dim, action_dim)
         self.device = torch.device(device)
-        self.lr = float(lr)
 
         self.model: BcModel = BcModel(
             obs_horizon=self.obs_horizon,

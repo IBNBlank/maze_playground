@@ -38,7 +38,7 @@ fi
 
 DEMONS_ROOT="${DEMONS_ROOT:-../demons}"
 SHARD_SIZE="${SHARD_SIZE:-2048}"
-NUM_IDX_PERMS="${NUM_IDX_PERMS:-300}"
+NUM_IDX_PERMS="${NUM_IDX_PERMS:-1000}"
 IDX_PERM_SEED="${IDX_PERM_SEED:-0}"
 ACTION_HORIZON="${ACTION_HORIZON:-72}"
 
@@ -48,10 +48,10 @@ if [ -n "${DEMONS_IDS:-}" ]; then
 	DATASET_JOBS=("${DATASET_NAME:-default}|${DEMONS_IDS}")
 else
 	DATASET_JOBS=(
-		# "genplan256_r2|genplan256_r2"
+		"genplan256_r2|genplan256_r2"
 		# "genplan256_r3|genplan256_r3"
 		# "genplan256_r4|genplan256_r4"
-		"genplan256_mix|genplan256_r2 genplan256_r3 genplan256_r4"
+		# "genplan256_mix|genplan256_r2 genplan256_r3 genplan256_r4"
 	)
 fi
 

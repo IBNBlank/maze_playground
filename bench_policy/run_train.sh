@@ -16,6 +16,7 @@
 #   MAZE_SEEDS             : space-separated seeds (default: 42)
 #   EPOCHS                 : training epochs (default: 200)
 #   EVAL_FREQ              : eval every N epochs (default: 5)
+#   USE_CLASS              : 1/true to enable route-cond class (default: 0)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
 ###############################################################################
@@ -32,23 +33,30 @@ else
 	PYTHON="${REPO_DIR}/.venv/bin/python"
 fi
 
-read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc}"
+read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act}"
 MAZE_SEEDS="${MAZE_SEEDS:-42}"
-EPOCHS="${EPOCHS:-200}"
+EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"
+USE_CLASS="${USE_CLASS:-1}"
 MAX_CONSECUTIVE_FAILS="${MAX_CONSECUTIVE_FAILS:-5}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
+
+case "${USE_CLASS,,}" in
+	1|true|yes|on) USE_CLASS_FLAG="--use-class" ;;
+	*) USE_CLASS_FLAG="--no-use-class" ;;
+esac
 
 if [ -n "${DATASET_NAME:-}" ]; then
 	DATASETS=("${DATASET_NAME}")
 else
 	DATASETS=(
-		"genplan256_mix"
+		# "genplan256_mix"
+		"genplan256_r2"
 	)
 fi
 
 echo "[run_train] datasets=${#DATASETS[@]} algos=${MAZE_ALGOS[*]} seeds=${MAZE_SEEDS}"
-echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ}"
+echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ} use_class=${USE_CLASS}"
 echo "[run_train] loop order: seed -> dataset -> algo"
 
 for seed in ${MAZE_SEEDS}; do
@@ -63,7 +71,7 @@ for seed in ${MAZE_SEEDS}; do
 
 		for algo in "${MAZE_ALGOS[@]}"; do
 			echo "######################################################################"
-			echo "[run_train] === seed=${seed} dataset=${dataset} algo=${algo} ==="
+			echo "[run_train] === seed=${seed} dataset=${dataset} algo=${algo} use_class=${USE_CLASS} ==="
 			echo "######################################################################"
 
 			fails=0
@@ -74,6 +82,7 @@ for seed in ${MAZE_SEEDS}; do
 				--seed "${seed}" \
 				--epochs "${EPOCHS}" \
 				--eval-freq "${EVAL_FREQ}" \
+				${USE_CLASS_FLAG} \
 				${EXTRA_ARGS}
 			code=$?
 
@@ -104,4 +113,5 @@ echo "[run_train] all jobs finished. done."
 "${PYTHON}" notify_train.py \
 	--seeds ${MAZE_SEEDS} \
 	--algos "${MAZE_ALGOS[@]}" \
-	--datasets "${DATASETS[@]}"
+	--datasets "${DATASETS[@]}" \
+	${USE_CLASS_FLAG}

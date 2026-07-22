@@ -12,6 +12,8 @@ import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from .common import make_run_name
+
 if TYPE_CHECKING:
     from .common import Metrics
 
@@ -204,6 +206,7 @@ def send_feishu_train_sweep_notification(
     seeds: Sequence[Any],
     algos: Sequence[str],
     dataset_names: Sequence[str],
+    use_class: bool = False,
     enabled: bool = True,
 ) -> bool:
     """Notify after a full ``run_train.sh`` sweep finishes."""
@@ -212,7 +215,8 @@ def send_feishu_train_sweep_notification(
         return False
     md = (f"- **datasets:** {' '.join(str(d) for d in dataset_names)}\n"
           f"- **seeds:** {' '.join(str(s) for s in seeds)}\n"
-          f"- **algos:** {' '.join(str(a) for a in algos)}")
+          f"- **algos:** {' '.join(str(a) for a in algos)}\n"
+          f"- **use_class:** {use_class}")
     return send_feishu_notification(
         repo_dir,
         mode="train",
@@ -228,6 +232,7 @@ def mean_eval_success_rate(
     seeds: Sequence[Any],
     dataset_names: Sequence[str],
     algos: Sequence[str],
+    use_class: bool = False,
 ) -> Optional[float]:
     """Average ``success_rate`` over existing ``eval_result.json`` files."""
     rates: list[float] = []
@@ -235,7 +240,9 @@ def mean_eval_success_rate(
     for seed in seeds:
         for dataset in dataset_names:
             for algo in algos:
-                path = root / f"seed{seed}_{dataset}_{algo}" / "eval_result.json"
+                run = make_run_name(
+                    seed, dataset, algo, use_class=use_class)
+                path = root / run / "eval_result.json"
                 if not path.is_file():
                     continue
                 try:
@@ -256,6 +263,7 @@ def send_feishu_eval_sweep_notification(
     algos: Sequence[str],
     dataset_names: Sequence[str],
     mean_success_rate: Optional[float] = None,
+    use_class: bool = False,
     enabled: bool = True,
 ) -> bool:
     """Notify after a full ``run_eval.sh`` sweep finishes."""
@@ -266,6 +274,7 @@ def send_feishu_eval_sweep_notification(
         f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",
         f"- **seeds:** {' '.join(str(s) for s in seeds)}",
         f"- **algos:** {' '.join(str(a) for a in algos)}",
+        f"- **use_class:** {use_class}",
     ]
     if mean_success_rate is not None and mean_success_rate == mean_success_rate:
         md_lines.append(

@@ -20,6 +20,17 @@ from torch.utils.tensorboard import SummaryWriter
 #--------------------------------#
 
 
+def make_run_name(
+    seed: int,
+    dataset_name: str,
+    algo: str,
+    use_class: bool = False,
+) -> str:
+    """Canonical run dir name under ``runs/``."""
+    name = f"seed{seed}_{dataset_name}_{algo}"
+    return f"priv_{name}" if use_class else name
+
+
 def device_init(
     seed: int,
     torch_deterministic: bool = True,
@@ -121,6 +132,17 @@ _PREVIEW_COLORS = {
 }
 
 
+def inflate_occupancy(occupancy: np.ndarray, radius: int) -> np.ndarray:
+    """Dilate obstacles by ``radius`` (same ellipse kernel as data_gen)."""
+    occ = (np.asarray(occupancy) > 0).astype(np.uint8)
+    radius = int(radius)
+    if radius <= 0:
+        return occ.astype(bool)
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
+    return cv2.dilate(occ, kernel).astype(bool)
+
+
 def _render_rollout_tile(
     planning_map: np.ndarray,
     path_xy: np.ndarray,
@@ -190,10 +212,14 @@ def evaluate(
     device: torch.device,
     goal_tol: float = 1.0,
     max_abs_delta: float = 5.0,
+    robot_radius: int = 5,
     preview_path: Optional[str] = None,
     preview_count: int = 16,
 ) -> dict:
     """Open-loop eval: one action-chunk inference from start, then step.
+
+    Collision uses occupancy dilated by ``robot_radius`` (center-point check on
+    the inflated map), matching data_gen ``planning_map``.
 
     If ``preview_path`` is set, also write a collage of the first
     ``preview_count`` rollout overlays.
@@ -202,10 +228,13 @@ def evaluate(
     want_preview = preview_path is not None and int(preview_count) > 0
     results: list[tuple[bool, bool, int]] = []
     preview_tiles: list[np.ndarray] = []
+    robot_radius = int(robot_radius)
 
     for ep in episodes:
-        planning_map = np.asarray(ep["planning_map"])
-        size = int(planning_map.shape[0])
+        # Dataset ``map`` is raw occupancy; inflate for robot footprint.
+        occupancy = np.asarray(ep["planning_map"])
+        collision_map = inflate_occupancy(occupancy, robot_radius)
+        size = int(occupancy.shape[0])
         scale = float(size - 1)
         cur = np.array(
             [float(ep["start_rc"][1]), float(ep["start_rc"][0])],
@@ -222,15 +251,20 @@ def evaluate(
         collided = False
         reached = float(np.linalg.norm(cur - goal)) < goal_tol
         if not reached:
-            state = np.array(
-                [[cur[0] / scale, cur[1] / scale,
-                  goal[0] / scale, goal[1] / scale]],
-                dtype=np.float32,
-            )
+            state_list = [
+                cur[0] / scale,
+                cur[1] / scale,
+                goal[0] / scale,
+                goal[1] / scale,
+            ]
+            # Privileged class: append as one extra state dim (4 -> 5).
+            if "class" in ep:
+                state_list.append(float(ep["class"]))
+            state = np.asarray([state_list], dtype=np.float32)
             with torch.no_grad():
                 chunk = policy.infer_batch({
                     "map":
-                    torch.from_numpy(planning_map.astype(np.float32)[None]).to(
+                    torch.from_numpy(occupancy.astype(np.float32)[None]).to(
                         device),
                     "state":
                     torch.from_numpy(state[None]).to(device),
@@ -247,7 +281,7 @@ def evaluate(
                 if path is not None:
                     path.append(cur.copy())
                 c, r = int(np.rint(cur[0])), int(np.rint(cur[1]))
-                if planning_map[r, c] > 0:
+                if collision_map[r, c]:
                     collided = True
                     # finish drawing the rest of this chunk into / through walls
                     if path is not None:
@@ -268,7 +302,7 @@ def evaluate(
         if path is not None:
             preview_tiles.append(
                 _render_rollout_tile(
-                    planning_map,
+                    occupancy,
                     np.asarray(path, dtype=np.float32),
                     ep["start_rc"],
                     ep["goal_rc"],

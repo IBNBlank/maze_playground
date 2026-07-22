@@ -8,13 +8,17 @@
 """Sharded maze dataset.
 
 Usage:
-  ds.set_epoch(epoch_id, batch_size=64)   # load all shards, order by epoch idx
+  ds.set_epoch(epoch_id, batch_size=64)   # load epoch index only
   while (batch := ds.get_batch()) is not None:  # last batch may be shorter
       ...
 
-Batch fields: map (H,W), state (1,4) in [0,1], action (T,2) in [-1,1].
-state_dim: int = 4: state dimension: [x, y, goal_x, goal_y] in normalized coords
+Batch fields: map (H,W), state (1, state_dim) in [0,1], action (T,2) in [-1,1].
+state_dim=4: [x, y, goal_x, goal_y]; with ``use_class`` appends class -> 5.
 action_dim: int = 2: action dimension: [dx, dy] in pixels
+
+Training never materializes the full float32 epoch. Shards stay in an LRU
+(maps as uint8); each batch gathers rows by global index and casts maps
+to float32 only for the batch tensor.
 """
 
 import json
@@ -26,7 +30,12 @@ from pathlib import Path
 
 class MazeWindowDataset:
 
-    def __init__(self, dataset_dir: Path | str, cache_shards: int = 2):
+    def __init__(
+        self,
+        dataset_dir: Path | str,
+        cache_shards: int | None = None,
+        use_class: bool = False,
+    ):
         self.dataset_dir = Path(dataset_dir).resolve()
         with open(self.dataset_dir / "dataset.json", encoding="utf-8") as f:
             summary = json.load(f)
@@ -35,8 +44,10 @@ class MazeWindowDataset:
             encoding="utf-8")) if cfg_path.is_file() else {})
 
         self.pred_horizon = int(summary["action_horizon"])
-        self.state_dim = int(summary["state_dim"])
+        self.use_class = bool(use_class)
+        self.state_dim = int(summary["state_dim"]) + (1 if self.use_class else 0)
         self.action_dim = int(summary["action_dim"])
+        self.map_shape = tuple(int(x) for x in summary["map_shape"])
 
         self.shards = list(summary["shards"])
         self.num_samples = int(summary["num_samples"])
@@ -44,14 +55,19 @@ class MazeWindowDataset:
         self.shard_size = int(
             summary.get("shard_size", self.shards[0]["num_samples"]))
         self.max_abs_delta = float(config.get("max_abs_delta", 5.0))
+        self.robot_radius = int(config.get("robot_radius", 5))
         self._state_scale = float(summary["map_shape"][0] - 1)
 
-        # small LRU for episode_at / incidental shard reads
-        self._cache_shards = max(1, int(cache_shards))
+        # Default: cache every shard (uint8 maps). Under a full shuffle each
+        # batch touches most shards; a tiny LRU would thrash compressed NPZ.
+        if cache_shards is None:
+            self._cache_shards = max(1, len(self.shards))
+        else:
+            self._cache_shards = max(1, int(cache_shards))
         self._cache: OrderedDict[int, dict] = OrderedDict()
 
-        # filled by set_epoch
-        self._epoch: dict[str, np.ndarray] | None = None
+        # filled by set_epoch — only the index order, not sample arrays
+        self._order: np.ndarray | None = None
         self._batch_size = 0
         self._batch_i = 0
         self._num_batches = 0
@@ -64,7 +80,10 @@ class MazeWindowDataset:
         return self._num_batches
 
     def set_epoch(self, epoch_id: int, batch_size: int):
-        """Load all shards, reorder by epoch idx, reset batch cursor."""
+        """Load epoch index permutation and reset batch cursor.
+
+        Does not load sample arrays; shards are fetched on demand in get_batch.
+        """
         indices = np.load(self.dataset_dir / "idx" /
                           f"epoch_{int(epoch_id):03d}.npy")
         if len(indices) != self.num_samples:
@@ -72,40 +91,52 @@ class MazeWindowDataset:
                 f"epoch_{int(epoch_id):03d}.npy length {len(indices)} != "
                 f"num_samples {self.num_samples}")
 
-        order = np.asarray(indices, dtype=np.int64)
-
-        # load every shard once, concatenate, then permute
-        maps_l, states_l, actions_l = [], [], []
-        for sid in range(len(self.shards)):
-            sh = self._load_shard(sid)
-            maps_l.append(sh["map"])
-            states_l.append(sh["state"])
-            actions_l.append(sh["action"])
-        maps = np.concatenate(maps_l, axis=0)[order]
-        states = np.concatenate(states_l, axis=0)[order]
-        actions = np.concatenate(actions_l, axis=0)[order]
-        if len(maps) != self.num_samples:
-            raise ValueError(f"concatenated samples {len(maps)} != "
-                             f"num_samples {self.num_samples}")
-
-        self._epoch = {"map": maps, "state": states, "action": actions}
+        self._order = np.asarray(indices, dtype=np.int64)
         self._batch_size = int(batch_size)
         self._batch_i = 0
         self._num_batches = ((self.num_samples + self._batch_size - 1) //
                              self._batch_size)
 
     def get_batch(self) -> dict[str, torch.Tensor] | None:
-        """Next training batch from the epoch cache, or None when exhausted."""
-        if self._epoch is None or self._batch_i >= self._num_batches:
+        """Next training batch gathered from cached shards, or None when done."""
+        if self._order is None or self._batch_i >= self._num_batches:
             return None
         s = self._batch_i * self._batch_size
         e = min(s + self._batch_size, self.num_samples)
         self._batch_i += 1
-        ep = self._epoch
+        idxs = self._order[s:e]
+        n = int(idxs.shape[0])
+        h, w = self.map_shape
+
+        maps = np.empty((n, h, w), dtype=np.uint8)
+        states = np.empty((n, self.state_dim), dtype=np.float32)
+        actions = np.empty((n, self.pred_horizon, self.action_dim),
+                           dtype=np.float32)
+
+        # Group by shard so each NPZ is touched at most once per batch.
+        by_shard: dict[int, list[tuple[int, int]]] = {}
+        n_shards = len(self.shards)
+        for pos, gidx in enumerate(idxs.tolist()):
+            sid = min(int(gidx) // self.shard_size, n_shards - 1)
+            local = int(gidx) - sid * self.shard_size
+            by_shard.setdefault(sid, []).append((pos, local))
+
+        for sid, pairs in by_shard.items():
+            sh = self._ensure_shard(sid)
+            positions = np.fromiter((p for p, _ in pairs),
+                                    dtype=np.int64,
+                                    count=len(pairs))
+            locals_ = np.fromiter((loc for _, loc in pairs),
+                                  dtype=np.int64,
+                                  count=len(pairs))
+            maps[positions] = sh["map"][locals_]
+            states[positions] = sh["state"][locals_]
+            actions[positions] = sh["action"][locals_]
+
         return {
-            "map": torch.from_numpy(ep["map"][s:e]),
-            "state": torch.from_numpy(ep["state"][s:e, None, :]),
-            "action": torch.from_numpy(ep["action"][s:e]),
+            "map": torch.from_numpy(maps.astype(np.float32)),
+            "state": torch.from_numpy(states[:, None, :]),
+            "action": torch.from_numpy(actions),
         }
 
     def _load_shard(self, shard_idx: int) -> dict:
@@ -115,9 +146,15 @@ class MazeWindowDataset:
                 [rc[:, 1], rc[:, 0], rc[:, 3], rc[:, 2]],
                 axis=1,
             ) / self._state_scale
+            if self.use_class:
+                state = np.concatenate(
+                    [state, np.asarray(z["class"], dtype=np.float32).reshape(-1, 1)],
+                    axis=1,
+                )
             return {
+                # Keep occupancy as uint8 in RAM; cast only when building batches.
                 "map":
-                np.asarray(z["map"], dtype=np.float32),
+                np.asarray(z["map"], dtype=np.uint8),
                 "state":
                 state.astype(np.float32),
                 "state_rc":
@@ -143,8 +180,11 @@ class MazeWindowDataset:
         local = int(idx) - sid * self.shard_size
         c = self._ensure_shard(sid)
         rc = c["state_rc"][local]
-        return {
+        ep = {
             "planning_map": c["map"][local],
             "start_rc": rc[:2],
             "goal_rc": rc[2:],
         }
+        if self.use_class:
+            ep["class"] = float(c["state"][local, -1])
+        return ep

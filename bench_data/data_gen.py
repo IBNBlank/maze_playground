@@ -130,42 +130,28 @@ def polyline_point(polyline: np.ndarray, alpha: float) -> np.ndarray:
 def sample_start_goal(
         cfg: GenCfg,
         rng: np.random.Generator) -> tuple[RC, RC, np.ndarray, np.ndarray]:
-    """Sample opposite-side endpoints and return tangent/normal unit vectors."""
+    """Sample left→right endpoints and return tangent/normal unit vectors.
+
+    Start is always on the left border, goal on the right. Row jitter is
+    independent so the chord may tilt slightly; travel direction stays L→R.
+    """
     size = cfg.size
     margin = cfg.endpoint_margin
     center = (size - 1) * 0.5
     jitter = cfg.endpoint_center_jitter_ratio * size
-    horizontal = bool(rng.integers(0, 2))
 
-    if horizontal:
-        start = (
-            int(
-                np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
-                        size - margin - 1)),
-            margin,
-        )
-        goal = (
-            int(
-                np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
-                        size - margin - 1)),
-            size - margin - 1,
-        )
-    else:
-        start = (
-            margin,
-            int(
-                np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
-                        size - margin - 1)),
-        )
-        goal = (
-            size - margin - 1,
-            int(
-                np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
-                        size - margin - 1)),
-        )
-
-    if rng.random() < 0.5:
-        start, goal = goal, start
+    start = (
+        int(
+            np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
+                    size - margin - 1)),
+        margin,
+    )
+    goal = (
+        int(
+            np.clip(round(center + rng.uniform(-jitter, jitter)), margin,
+                    size - margin - 1)),
+        size - margin - 1,
+    )
 
     delta = np.asarray([goal[0] - start[0], goal[1] - start[1]],
                        dtype=np.float32)
@@ -174,6 +160,7 @@ def sample_start_goal(
         raise RuntimeError(
             "Endpoint sampler produced a pair that is too close")
     tangent = delta / distance
+    # Left-handed normal: for L→R tangent ≈ (0, 1), normal ≈ (-1, 0) (up).
     normal = np.asarray([-tangent[1], tangent[0]], dtype=np.float32)
     return start, goal, tangent, normal
 
@@ -194,8 +181,10 @@ def build_route_polylines(
         cfg.route_separation_ratio * cfg.size,
         0.5 * route_distance,
     )
-    offsets = np.linspace(-max_offset,
-                          max_offset,
+    # Positive normal offset → toward top (decreasing row for L→R). Emit
+    # routes top→bottom so index 0 is the uppermost corridor (route class 0).
+    offsets = np.linspace(max_offset,
+                          -max_offset,
                           cfg.num_routes,
                           dtype=np.float32)
     offsets += float(rng.uniform(-0.06, 0.06) * cfg.size)
@@ -637,6 +626,13 @@ def generate_single_sample(
         return None
     routes, optimal_length = route_result
 
+    # Stable top→bottom order (mean row ascending) for route-class labels.
+    order = np.argsort(
+        np.asarray([float(route[:, 0].mean()) for route in routes],
+                   dtype=np.float32))
+    routes = [routes[int(i)] for i in order]
+    guide_masks = [guide_masks[int(i)] for i in order]
+
     waypoints = np.empty((cfg.num_routes, cfg.action_horizon + 1, 2),
                          dtype=np.float32)
     actions = np.empty((cfg.num_routes, cfg.action_horizon, 2),
@@ -646,6 +642,7 @@ def generate_single_sample(
                         dtype=np.int16)
     raw_lengths = np.empty(cfg.num_routes, dtype=np.int16)
     route_lengths = np.empty(cfg.num_routes, dtype=np.float32)
+    route_classes = np.arange(cfg.num_routes, dtype=np.int16)
 
     for index, route in enumerate(routes):
         chunk = route_to_chunk(route, planning_map, guide_masks[index], cfg)
@@ -672,6 +669,7 @@ def generate_single_sample(
         "raw_paths_rc": raw_paths,
         "raw_path_lengths": raw_lengths,
         "route_lengths": route_lengths,
+        "route_classes": route_classes,
         "optimal_lengths": np.asarray(optimal_length, dtype=np.float32),
     }
 
@@ -744,12 +742,17 @@ def main() -> None:
     preview_name = "preview.png"
     save_preview(preview_samples, args.output_dir / preview_name)
     manifest = {
-        "format": "genplan-multimodal-grid-v2",
+        "format": "genplan-multimodal-grid-v3",
         "num_maps": args.num_maps,
         "num_shards": len(shard_names),
         "shards": shard_names,
         "preview": preview_name,
         "config": "config.json",
+        "endpoint_layout": "left_to_right",
+        "route_order": "top_to_bottom",
+        "route_classes": (
+            "int16 [0, num_routes); index 0 = uppermost L→R corridor"
+        ),
         "action_encoding": {
             "waypoints_xy": "absolute x,y normalized by size-1",
             "action_chunks": (

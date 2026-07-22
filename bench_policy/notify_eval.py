@@ -29,8 +29,10 @@ class NotifyEvalArgs:
     """policy algorithms used in the sweep"""
     datasets: list[str]
     """dataset names under ../datasets/"""
+    use_class: bool = False
+    """match train/eval --use-class run dirs (priv_*)"""
     runs_dir: str = "runs"
-    """directory containing seed{seed}_{dataset}_{algo}/eval_result.json"""
+    """directory containing [priv_]seed{seed}_{dataset}_{algo}/eval_result.json"""
 
 
 def main():
@@ -40,13 +42,19 @@ def main():
         runs_dir = Path(os.path.dirname(os.path.abspath(__file__))) / runs_dir
 
     mean = mean_eval_success_rate(
-        runs_dir, args.seeds, args.datasets, args.algos)
+        runs_dir,
+        args.seeds,
+        args.datasets,
+        args.algos,
+        use_class=args.use_class,
+    )
     send_feishu_eval_sweep_notification(
         REPO_DIR,
         seeds=args.seeds,
         algos=args.algos,
         dataset_names=args.datasets,
         mean_success_rate=mean,
+        use_class=args.use_class,
     )
 
 

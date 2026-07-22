@@ -24,6 +24,8 @@ class _SharedArgs:
     """policy algorithm: bc | act | dp | fm"""
     dataset_name: str = "genplan256_mix"
     """subdir under ../datasets/"""
+    use_class: bool = False
+    """if True, append class to state (state_dim 4 -> 5); run_name = priv_*"""
 
     # eval knobs shared by train mid-eval and eval.py
     num_eval: int = 100
@@ -37,10 +39,8 @@ class TrainArgs(_SharedArgs):
     # train
     epochs: int = 100
     """number of training epochs (= number of idx/epoch_*.npy perms to use)"""
-    batch_size: int = 256
+    batch_size: int = 512
     """samples per training batch (last batch of an epoch may be shorter)"""
-    lr: float = 3e-4
-    """learning rate"""
 
     # eval
     eval_freq: int = 5

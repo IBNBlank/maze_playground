@@ -22,6 +22,7 @@ from utils.common import (
     load,
     device_init,
     log_eval_summary,
+    make_run_name,
 )
 from utils.data import MazeWindowDataset
 from utils.policy import build_policy
@@ -33,7 +34,12 @@ class EvalMazeIL:
 
     def __init__(self):
         self.args: EvalArgs = tyro.cli(EvalArgs)
-        self.run_name = f"seed{self.args.seed}_{self.args.dataset_name}_{self.args.algo}"
+        self.run_name = make_run_name(
+            self.args.seed,
+            self.args.dataset_name,
+            self.args.algo,
+            use_class=self.args.use_class,
+        )
 
         self.device = device_init(
             0,
@@ -47,7 +53,10 @@ class EvalMazeIL:
         )
 
         dataset_dir = Path(REPO_DIR) / "datasets" / self.args.dataset_name
-        self.dataset = MazeWindowDataset(dataset_dir)
+        self.dataset = MazeWindowDataset(
+            dataset_dir,
+            use_class=self.args.use_class,
+        )
         self.episodes = build_eval_episodes(
             self.dataset,
             max_episodes=self.args.num_eval,
@@ -60,7 +69,6 @@ class EvalMazeIL:
             state_dim=self.dataset.state_dim,
             action_dim=self.dataset.action_dim,
             device=self.device,
-            lr=3e-4,
         )
         load(self.policy, f"runs/{self.run_name}/{self.args.ckpt_name}")
 
@@ -74,6 +82,7 @@ class EvalMazeIL:
             device=self.device,
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
+            robot_radius=self.dataset.robot_radius,
             preview_path=(f"runs/{self.run_name}/eval_preview.png"
                           if self.args.capture_preview else None),
         )
@@ -84,6 +93,7 @@ class EvalMazeIL:
         result = {
             "algo": self.args.algo,
             "dataset_name": self.args.dataset_name,
+            "use_class": self.args.use_class,
             "ckpt_name": self.args.ckpt_name,
             "train_seed": self.args.seed,
             "run_name": self.run_name,
