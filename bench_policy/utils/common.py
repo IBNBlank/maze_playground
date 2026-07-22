@@ -106,7 +106,7 @@ def log_eval_summary(
         bs = best_steps if best_steps is not None else float("inf")
         bs_s = "inf" if bs != bs or bs == float("inf") else f"{bs:.1f}"
         line += f"  best={best_rate * 100:.1f}%/{bs_s}"
-    print(line)
+    tqdm.tqdm.write(line)
     if writer is not None:
         for k, v in summary.items():
             if isinstance(v, (float, np.floating)):
@@ -204,7 +204,7 @@ def save_eval_preview(
         c0 = (index % columns) * tile_w
         canvas[r0:r0 + tile_h, c0:c0 + tile_w] = tile
     cv2.imwrite(str(path), cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
-    print(f"[eval] preview saved to {path}")
+    tqdm.tqdm.write(f"[eval] preview saved to {path}")
 
 
 def evaluate(
@@ -236,7 +236,7 @@ def evaluate(
     pbar = tqdm.tqdm(
         episodes,
         desc="eval",
-        leave=True,
+        leave=False,
         dynamic_ncols=True,
     )
     for ep in pbar:
@@ -400,7 +400,7 @@ def save(
         shutil.copy(ckpt_path, f"{run_dir}/best_success_ckpt.pt")
         shutil.copy(latest_json, f"{run_dir}/best_success.json")
 
-    print(f"ckpt saved to {ckpt_path}")
+    tqdm.tqdm.write(f"ckpt saved to {ckpt_path}")
     return ckpt_path
 
 

@@ -167,8 +167,8 @@ class TrainMazeIL:
         return epoch_loss
 
     def _eval_and_save(self, epoch_1based: int, is_final: bool = False):
-        print(f"[train] evaluating at epoch={epoch_1based}"
-              f"{' (final)' if is_final else ''}")
+        tqdm.tqdm.write(f"[train] evaluating at epoch={epoch_1based}"
+                        f"{' (final)' if is_final else ''}")
         summary = evaluate(
             self.policy,
             self.eval_episodes,
@@ -225,7 +225,9 @@ class TrainMazeIL:
             if (self.args.eval_freq > 0
                     and epoch_1based % self.args.eval_freq == 0
                     and epoch_1based < self.args.epochs):
+                epoch_pbar.clear()
                 self._eval_and_save(epoch_1based, is_final=False)
+                epoch_pbar.refresh()
 
             epoch_pbar.set_postfix(self._epoch_postfix(epoch_loss, epoch_id))
 
