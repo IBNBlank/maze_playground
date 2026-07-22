@@ -35,7 +35,7 @@ else
 	PYTHON="${REPO_DIR}/.venv/bin/python"
 fi
 
-read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act}"
+read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act dp fm}"
 MAZE_SEEDS="${MAZE_SEEDS:-42}"
 EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"

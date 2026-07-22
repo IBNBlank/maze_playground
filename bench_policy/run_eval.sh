@@ -37,7 +37,7 @@ else
 	PYTHON="${REPO_DIR}/.venv/bin/python"
 fi
 
-read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act}"
+read -r -a MAZE_ALGOS <<< "${MAZE_ALGOS:-bc act dp fm}"
 MAZE_SEEDS="${MAZE_SEEDS:-42}"
 MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-best_success_ckpt.pt}"
 # MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-final_ckpt.pt}"

@@ -163,43 +163,6 @@ def send_feishu_train_notification(
     )
 
 
-def send_feishu_eval_notification(
-    repo_dir: str,
-    *,
-    algo: str,
-    dataset_name: str,
-    seed: int,
-    summary: dict,
-    run_name: Optional[str] = None,
-    enabled: bool = True,
-) -> bool:
-    """Notify after one evaluation run finishes."""
-    success = float(summary["success_rate"])
-    succ_steps = float(summary["success_average_steps"])
-    collision = float(summary["collision_rate"])
-    steps_text = ("n/a" if succ_steps != succ_steps
-                  or succ_steps == float("inf") else f"{succ_steps:.2f}")
-
-    md_lines = [
-        f"- **algo:** {algo}",
-        f"- **dataset:** {dataset_name}",
-        f"- **seed:** {seed}",
-        f"- **success_rate:** {success * 100:.2f}%",
-        f"- **success_average_steps:** {steps_text}",
-        f"- **collision_rate:** {collision * 100:.2f}%",
-        f"- **num_episodes:** {summary.get('num_episodes', '-')}",
-    ]
-    if run_name:
-        md_lines.insert(0, f"- **run:** {run_name}")
-    return send_feishu_notification(
-        repo_dir,
-        mode="eval",
-        markdown="\n".join(md_lines),
-        success_rate=success,
-        enabled=enabled,
-    )
-
-
 def send_feishu_train_sweep_notification(
     repo_dir: str,
     *,
@@ -226,17 +189,27 @@ def send_feishu_train_sweep_notification(
     )
 
 
-def mean_eval_success_rate(
+def _fmt_steps(value: Any) -> str:
+    try:
+        steps = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if steps != steps or steps == float("inf"):
+        return "n/a"
+    return f"{steps:.2f}"
+
+
+def collect_eval_results(
     runs_dir: str | Path,
     seeds: Sequence[Any],
     dataset_names: Sequence[str],
     algos: Sequence[str],
-) -> Optional[float]:
-    """Average ``success_rate`` over existing ``eval_result.json`` files.
+) -> list[dict]:
+    """Load existing ``eval_result.json`` files for a sweep grid.
 
-    Covers both ``use_class=0/1`` run dirs; missing results are skipped.
+    Covers both ``use_class=0/1`` run dirs; missing / invalid results are skipped.
     """
-    rates: list[float] = []
+    results: list[dict] = []
     root = Path(runs_dir)
     for seed in seeds:
         for dataset in dataset_names:
@@ -251,13 +224,25 @@ def mean_eval_success_rate(
                         continue
                     try:
                         data = json.loads(path.read_text(encoding="utf-8"))
-                        rates.append(float(data["success_rate"]))
+                        results.append({
+                            "run_name": run,
+                            "algo": str(data.get("algo", algo)),
+                            "dataset_name": str(
+                                data.get("dataset_name", dataset)),
+                            "use_class": bool(
+                                data.get("use_class", use_class)),
+                            "seed": data.get("train_seed", seed),
+                            "success_rate": float(data["success_rate"]),
+                            "collision_rate": float(
+                                data.get("collision_rate", float("nan"))),
+                            "success_average_steps": data.get(
+                                "success_average_steps"),
+                            "num_episodes": data.get("num_episodes"),
+                        })
                     except (OSError, json.JSONDecodeError, KeyError, TypeError,
                             ValueError):
                         continue
-    if not rates:
-        return None
-    return float(sum(rates) / len(rates))
+    return results
 
 
 def send_feishu_eval_sweep_notification(
@@ -266,27 +251,55 @@ def send_feishu_eval_sweep_notification(
     seeds: Sequence[Any],
     algos: Sequence[str],
     dataset_names: Sequence[str],
-    mean_success_rate: Optional[float] = None,
+    results: Optional[Sequence[dict]] = None,
     enabled: bool = True,
 ) -> bool:
-    """Notify after a full ``run_eval.sh`` sweep finishes."""
+    """Notify after a full ``run_eval.sh`` sweep finishes (aggregate summary)."""
     if not seeds or not algos or not dataset_names:
         print("[feishu] empty eval sweep; nothing to notify")
         return False
+
+    expected = len(seeds) * len(dataset_names) * len(algos) * 2
+    rows = list(results) if results is not None else []
+    success_rates = [float(r["success_rate"]) for r in rows]
+    collision_rates = [
+        float(r["collision_rate"]) for r in rows
+        if float(r["collision_rate"]) == float(r["collision_rate"])
+    ]
+    mean_success = (float(sum(success_rates) / len(success_rates))
+                    if success_rates else None)
+    mean_collision = (float(sum(collision_rates) / len(collision_rates))
+                      if collision_rates else None)
+
     md_lines = [
         f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",
         f"- **seeds:** {' '.join(str(s) for s in seeds)}",
         f"- **algos:** {' '.join(str(a) for a in algos)}",
         f"- **use_class:** 0 1",
+        f"- **completed:** {len(rows)}/{expected}",
     ]
-    if mean_success_rate is not None and mean_success_rate == mean_success_rate:
+    if mean_success is not None:
+        md_lines.append(f"- **mean_success_rate:** {mean_success * 100:.2f}%")
+    if mean_collision is not None:
         md_lines.append(
-            f"- **mean_success_rate:** {mean_success_rate * 100:.2f}%")
+            f"- **mean_collision_rate:** {mean_collision * 100:.2f}%")
+
+    if rows:
+        md_lines.append("")
+        md_lines.append("**per-run**")
+        for r in rows:
+            md_lines.append(
+                f"- `{r['run_name']}`: "
+                f"succ={float(r['success_rate']) * 100:.2f}% "
+                f"coll={float(r['collision_rate']) * 100:.2f}% "
+                f"steps={_fmt_steps(r.get('success_average_steps'))}"
+            )
+
     return send_feishu_notification(
         repo_dir,
         mode="eval",
         title="Maze Evaluation Finished",
         markdown="\n".join(md_lines),
-        success_rate=mean_success_rate,
+        success_rate=mean_success,
         enabled=enabled,
     )

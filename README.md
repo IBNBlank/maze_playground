@@ -142,18 +142,14 @@ flowchart TB
         eval_python --> eval_log
         subgraph eval_log["logs"]
             eval_log_tb["runs/{run_name}/eval/ (tensorboard)"]
-            eval_log_result["runs/{run_name}/eval_result.json"]
-            eval_log_preview["runs/{run_name}/eval_preview.png"]
+            eval_log_result["runs/{run_name}/eval/eval_result.json"]
+            eval_log_preview["runs/{run_name}/eval/eval_preview.png"]
         end
 
-        eval_python --> eval_notify
-        subgraph eval_notify["notify"]
-            eval_notify_job["send_feishu_eval_notification"]
-        end
-
-        eval_bash --> eval_sweep["notify_eval.py → sweep"]
+        eval_bash --> eval_sweep["notify_eval.py → sweep summary"]
     end
 ```
+
 
 ### train.py
 
@@ -194,12 +190,12 @@ flowchart TB
     episodes --> policy["build_policy + load runs/{run_name}/{ckpt_name}"]
     policy --> roll["evaluate open-loop rollouts"]
     roll --> metrics["success_rate / success_average_steps / collision_rate"]
-    metrics --> log["log_eval_summary → tensorboard"]
-    log --> json["runs/{run_name}/eval_result.json"]
-    roll -.-> preview["runs/{run_name}/eval_preview.png"]
-    json --> feishu["send_feishu_eval_notification"]
-    feishu --> done["close writer"]
+    metrics --> log["log_eval_summary"]
+    log --> json["runs/{run_name}/eval/eval_result.json"]
+    roll -.-> preview["runs/{run_name}/eval/eval_preview.png"]
+    json --> done["return result"]
 ```
+
 
 ### Quick start
 

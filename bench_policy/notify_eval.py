@@ -5,7 +5,7 @@
 # Author: Dong Zhaorui 847235539@qq.com
 # Date  : 2026-07-21
 ################################################################
-"""Notify Feishu after a full ``run_eval.sh`` sweep."""
+"""Notify Feishu after a full ``run_eval.sh`` sweep (aggregate summary)."""
 
 import os, sys, tyro
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_DIR)
 
 from utils.feishu import (
-    mean_eval_success_rate,
+    collect_eval_results,
     send_feishu_eval_sweep_notification,
 )
 
@@ -39,7 +39,7 @@ def main():
     if not runs_dir.is_absolute():
         runs_dir = Path(os.path.dirname(os.path.abspath(__file__))) / runs_dir
 
-    mean = mean_eval_success_rate(
+    results = collect_eval_results(
         runs_dir,
         args.seeds,
         args.datasets,
@@ -50,7 +50,7 @@ def main():
         seeds=args.seeds,
         algos=args.algos,
         dataset_names=args.datasets,
-        mean_success_rate=mean,
+        results=results,
     )
 
 

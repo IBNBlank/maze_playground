@@ -25,7 +25,7 @@ class DpModelConfig:
     diffusion_step_embed_dim: int = 64
     unet_dims: tuple[int, ...] = (64, 128, 256)
     n_groups: int = 8
-    num_diffusion_iters: int = 100
+    num_diffusion_iters: int = 50
     kernel_size: int = 5
 
 
