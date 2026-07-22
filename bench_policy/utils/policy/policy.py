@@ -82,10 +82,15 @@ def build_policy(
             action_dim,
             device=device,
         )
-    # elif algo == "dp":
-    #     from .dp.policy import DpPolicy
-    #     return DpPolicy(obs_horizon, pred_horizon, state_dim,
-    #                    action_dim, device=device)
+    if algo == "dp":
+        from .dp.policy import DpPolicy
+        return DpPolicy(
+            obs_horizon,
+            pred_horizon,
+            state_dim,
+            action_dim,
+            device=device,
+        )
     # elif algo == "fm":
     #     from .fm.policy import FmPolicy
     #     return FmPolicy(obs_horizon, pred_horizon, state_dim,

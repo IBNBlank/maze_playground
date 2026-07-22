@@ -117,8 +117,8 @@ def send_feishu_notification(
         return False
 
     if title is None:
-        title = ("IL Training Finished"
-                 if mode == "train" else "IL Evaluation Finished")
+        title = ("Maze Training Finished"
+                 if mode == "train" else "Maze Evaluation Finished")
     if template is None:
         template = (_feishu_template_from_success(float(success_rate))
                     if success_rate is not None else "green")
@@ -219,7 +219,7 @@ def send_feishu_train_sweep_notification(
     return send_feishu_notification(
         repo_dir,
         mode="train",
-        title="IL Training Sweep Finished",
+        title="Maze Training Finished",
         markdown=md,
         template="green",
         enabled=enabled,
@@ -242,8 +242,10 @@ def mean_eval_success_rate(
         for dataset in dataset_names:
             for algo in algos:
                 for use_class in (False, True):
-                    run = make_run_name(
-                        seed, dataset, algo, use_class=use_class)
+                    run = make_run_name(seed,
+                                        dataset,
+                                        algo,
+                                        use_class=use_class)
                     path = root / run / "eval" / "eval_result.json"
                     if not path.is_file():
                         continue
@@ -283,7 +285,7 @@ def send_feishu_eval_sweep_notification(
     return send_feishu_notification(
         repo_dir,
         mode="eval",
-        title="IL Evaluation Sweep Finished",
+        title="Maze Evaluation Finished",
         markdown="\n".join(md_lines),
         success_rate=mean_success_rate,
         enabled=enabled,
