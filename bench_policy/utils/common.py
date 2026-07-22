@@ -219,8 +219,8 @@ def evaluate(
 ) -> dict:
     """Open-loop eval: one action-chunk inference from start, then step.
 
-    Collision uses occupancy dilated by ``robot_radius`` (center-point check on
-    the inflated map), matching data_gen ``planning_map``.
+    Collision uses occupancy dilated by ``max(0, robot_radius - 1)`` (relaxed
+    vs data_gen ``planning_map`` which uses full ``robot_radius``).
 
     If ``preview_path`` is set, also write a collage of the first
     ``preview_count`` rollout overlays.
@@ -229,7 +229,8 @@ def evaluate(
     want_preview = preview_path is not None and int(preview_count) > 0
     results: list[tuple[bool, bool, int]] = []
     preview_tiles: list[np.ndarray] = []
-    robot_radius = int(robot_radius)
+    # Relaxed eval collision: one pixel less inflate than training label radius.
+    collision_radius = max(0, int(robot_radius) - 1)
     n_coll = 0
     n_succ = 0
 
@@ -242,7 +243,7 @@ def evaluate(
     for ep in pbar:
         # Dataset ``map`` is raw occupancy; inflate for robot footprint.
         occupancy = np.asarray(ep["planning_map"])
-        collision_map = inflate_occupancy(occupancy, robot_radius)
+        collision_map = inflate_occupancy(occupancy, collision_radius)
         size = int(occupancy.shape[0])
         scale = float(size - 1)
         cur = np.array(

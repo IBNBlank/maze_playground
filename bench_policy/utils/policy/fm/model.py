@@ -16,6 +16,7 @@ import torch.nn as nn
 
 from utils.policy.helper.conditional_unet1d import ConditionalUnet1D
 from utils.policy.helper.fm_scheduler import build_fm_scheduler
+from utils.policy.helper.obs_encoder import ObsEncoder
 
 
 @dataclass
@@ -25,7 +26,7 @@ class FmModelConfig:
     diffusion_step_embed_dim: int = 64
     unet_dims: tuple[int, ...] = (64, 128, 256)
     n_groups: int = 8
-    num_inference_steps: int = 20
+    num_inference_steps: int = 10
     kernel_size: int = 5
 
 
@@ -47,28 +48,10 @@ class FmModel(nn.Module):
         self.action_dim = int(action_dim)
         self.cfg = cfg or FmModelConfig()
 
-        # Same map / state towers as BC / ACT / DP; fused cond FiLM-conditions UNet.
-        self.map_encoder = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((4, 4)),
-            nn.Flatten(),
-        )
-        self.state_encoder = nn.Sequential(
-            nn.Linear(self.obs_horizon * self.state_dim, 128),
-            nn.ReLU(inplace=True),
-            nn.Linear(128, 128),
-            nn.ReLU(inplace=True),
-        )
-        cond_dim = 64 * 4 * 4 + 128
-
+        self.obs_encoder = ObsEncoder(self.obs_horizon, self.state_dim)
         self.velocity_net = ConditionalUnet1D(
             input_dim=self.action_dim,
-            global_cond_dim=cond_dim,
+            global_cond_dim=self.obs_encoder.cond_dim,
             diffusion_step_embed_dim=self.cfg.diffusion_step_embed_dim,
             down_dims=self.cfg.unet_dims,
             kernel_size=self.cfg.kernel_size,
@@ -76,23 +59,6 @@ class FmModel(nn.Module):
         )
         self.num_inference_steps = int(self.cfg.num_inference_steps)
         self.fm_scheduler = build_fm_scheduler(self.num_inference_steps)
-
-    @staticmethod
-    def _normalize_map(maps: torch.Tensor) -> torch.Tensor:
-        """Accept ``(B, H, W)`` or ``(B, 1, H, W)`` -> ``(B, 1, H, W)``."""
-        if maps.ndim == 3:
-            return maps.unsqueeze(1)
-        if maps.ndim == 4:
-            return maps
-        raise ValueError(
-            f"map tensor must be 3D or 4D, got shape={tuple(maps.shape)}")
-
-    def encode_cond(self, maps: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-        maps = self._normalize_map(maps)
-        batch_size = maps.shape[0]
-        map_feat = self.map_encoder(maps)
-        state_feat = self.state_encoder(state.reshape(batch_size, -1))
-        return torch.cat([map_feat, state_feat], dim=-1)
 
     def predict_velocity(
         self,
@@ -102,7 +68,7 @@ class FmModel(nn.Module):
         state: torch.Tensor,
     ) -> torch.Tensor:
         """Predict velocity ``v̂`` for ``x_t`` at continuous ``t ∈ [0,1]``."""
-        cond = self.encode_cond(maps, state)
+        cond = self.obs_encoder(maps, state)
         t_embed = self.fm_scheduler.time_for_net(t).to(device=xt.device)
         return self.velocity_net(xt, t_embed, global_cond=cond)
 
@@ -111,7 +77,7 @@ class FmModel(nn.Module):
         """Euler ODE from noise (t=0) → action (t=1)."""
         batch_size = maps.shape[0] if maps.ndim >= 3 else state.shape[0]
         device = state.device
-        cond = self.encode_cond(maps, state)
+        cond = self.obs_encoder(maps, state)
         x = torch.randn(
             (batch_size, self.pred_horizon, self.action_dim),
             device=device,
