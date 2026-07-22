@@ -206,7 +206,6 @@ def send_feishu_train_sweep_notification(
     seeds: Sequence[Any],
     algos: Sequence[str],
     dataset_names: Sequence[str],
-    use_class: bool = False,
     enabled: bool = True,
 ) -> bool:
     """Notify after a full ``run_train.sh`` sweep finishes."""
@@ -216,7 +215,7 @@ def send_feishu_train_sweep_notification(
     md = (f"- **datasets:** {' '.join(str(d) for d in dataset_names)}\n"
           f"- **seeds:** {' '.join(str(s) for s in seeds)}\n"
           f"- **algos:** {' '.join(str(a) for a in algos)}\n"
-          f"- **use_class:** {use_class}")
+          f"- **use_class:** 0 1")
     return send_feishu_notification(
         repo_dir,
         mode="train",
@@ -232,25 +231,28 @@ def mean_eval_success_rate(
     seeds: Sequence[Any],
     dataset_names: Sequence[str],
     algos: Sequence[str],
-    use_class: bool = False,
 ) -> Optional[float]:
-    """Average ``success_rate`` over existing ``eval_result.json`` files."""
+    """Average ``success_rate`` over existing ``eval_result.json`` files.
+
+    Covers both ``use_class=0/1`` run dirs; missing results are skipped.
+    """
     rates: list[float] = []
     root = Path(runs_dir)
     for seed in seeds:
         for dataset in dataset_names:
             for algo in algos:
-                run = make_run_name(
-                    seed, dataset, algo, use_class=use_class)
-                path = root / run / "eval" / "eval_result.json"
-                if not path.is_file():
-                    continue
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                    rates.append(float(data["success_rate"]))
-                except (OSError, json.JSONDecodeError, KeyError, TypeError,
-                        ValueError):
-                    continue
+                for use_class in (False, True):
+                    run = make_run_name(
+                        seed, dataset, algo, use_class=use_class)
+                    path = root / run / "eval" / "eval_result.json"
+                    if not path.is_file():
+                        continue
+                    try:
+                        data = json.loads(path.read_text(encoding="utf-8"))
+                        rates.append(float(data["success_rate"]))
+                    except (OSError, json.JSONDecodeError, KeyError, TypeError,
+                            ValueError):
+                        continue
     if not rates:
         return None
     return float(sum(rates) / len(rates))
@@ -263,7 +265,6 @@ def send_feishu_eval_sweep_notification(
     algos: Sequence[str],
     dataset_names: Sequence[str],
     mean_success_rate: Optional[float] = None,
-    use_class: bool = False,
     enabled: bool = True,
 ) -> bool:
     """Notify after a full ``run_eval.sh`` sweep finishes."""
@@ -274,7 +275,7 @@ def send_feishu_eval_sweep_notification(
         f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",
         f"- **seeds:** {' '.join(str(s) for s in seeds)}",
         f"- **algos:** {' '.join(str(a) for a in algos)}",
-        f"- **use_class:** {use_class}",
+        f"- **use_class:** 0 1",
     ]
     if mean_success_rate is not None and mean_success_rate == mean_success_rate:
         md_lines.append(

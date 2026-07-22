@@ -17,8 +17,8 @@ from utils.policy.policy import PolicyBase
 class ActPolicy(PolicyBase):
     """CVAE action-chunking transformer (ACT)."""
 
-    lr: float = 1e-4
-    kl_weight: float = 10.0
+    lr: float = 2e-4
+    kl_weight: float = 5.0
 
     def __init__(
         self,

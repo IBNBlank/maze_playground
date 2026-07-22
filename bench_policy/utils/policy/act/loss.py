@@ -24,7 +24,7 @@ def act_loss(
     target: torch.Tensor,
     mu: torch.Tensor,
     logvar: torch.Tensor,
-    kl_weight: float = 10.0,
+    kl_weight: float = 5.0,
 ) -> torch.Tensor:
     """``MSE(pred, target) + kl_weight * KL(mu, logvar)``."""
     mse = F.mse_loss(pred, target)

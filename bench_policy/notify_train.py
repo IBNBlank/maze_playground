@@ -25,8 +25,6 @@ class NotifyTrainArgs:
     """policy algorithms used in the sweep"""
     datasets: list[str]
     """dataset names under ../datasets/"""
-    use_class: bool = False
-    """match train --use-class run dirs (priv_*)"""
 
 
 def main():
@@ -36,7 +34,6 @@ def main():
         seeds=args.seeds,
         algos=args.algos,
         dataset_names=args.datasets,
-        use_class=args.use_class,
     )
 
 

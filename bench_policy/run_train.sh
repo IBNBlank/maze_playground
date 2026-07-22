@@ -2,7 +2,7 @@
 ###############################################################################
 # Batch training wrapper for train.py (TrainArgs CLI).
 #
-# Nested schedule order: seed -> dataset -> algo.
+# Nested schedule order: seed -> dataset -> algo -> use_class.
 #
 # Usage:
 #   ./run_train.sh
@@ -19,7 +19,6 @@
 #   NUM_EVAL_EPISODES      : mid-train eval episodes; 0 = full epoch
 #                            (default: 1000)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
-#   USE_CLASS              : 1/true to enable route-cond class (default: 0)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
 ###############################################################################
@@ -42,14 +41,9 @@ EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-500}"
 GOAL_TOL="${GOAL_TOL:-2.0}"
-USE_CLASS="${USE_CLASS:-0}"
 MAX_CONSECUTIVE_FAILS="${MAX_CONSECUTIVE_FAILS:-5}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
-
-case "${USE_CLASS,,}" in
-	1|true|yes|on) USE_CLASS_FLAG="--use-class" ;;
-	*) USE_CLASS_FLAG="--no-use-class" ;;
-esac
+USE_CLASS_VALUES=(0 1)
 
 if [ -n "${DATASET_NAME:-}" ]; then
 	DATASETS=("${DATASET_NAME}")
@@ -61,8 +55,8 @@ else
 fi
 
 echo "[run_train] datasets=${#DATASETS[@]} algos=${MAZE_ALGOS[*]} seeds=${MAZE_SEEDS}"
-echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ} use_class=${USE_CLASS}"
-echo "[run_train] loop order: seed -> dataset -> algo"
+echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ} use_class=${USE_CLASS_VALUES[*]}"
+echo "[run_train] loop order: seed -> dataset -> algo -> use_class"
 
 for seed in ${MAZE_SEEDS}; do
 	for dataset in "${DATASETS[@]}"; do
@@ -75,41 +69,49 @@ for seed in ${MAZE_SEEDS}; do
 		fi
 
 		for algo in "${MAZE_ALGOS[@]}"; do
-			echo "######################################################################"
-			echo "[run_train] === seed=${seed} dataset=${dataset} algo=${algo} use_class=${USE_CLASS} ==="
-			echo "######################################################################"
-
-			fails=0
-			# shellcheck disable=SC2086
-			"${PYTHON}" train.py \
-				--algo "${algo}" \
-				--dataset-name "${dataset}" \
-				--seed "${seed}" \
-				--epochs "${EPOCHS}" \
-				--eval-freq "${EVAL_FREQ}" \
-				--num-eval "${NUM_EVAL_EPISODES}" \
-				--goal-tol "${GOAL_TOL}" \
-				${USE_CLASS_FLAG} \
-				${EXTRA_ARGS}
-			code=$?
-
-			if [ "${code}" -eq 0 ]; then
-				fails=0
-				echo "[run_train] seed=${seed} dataset=${dataset}" \
-					"algo=${algo}: finished cleanly."
-			elif [ "${code}" -eq 130 ]; then
-				echo "[run_train] interrupted by user (Ctrl-C). stopping."
-				exit 130
-			else
-				fails=$((fails + 1))
-				echo "[run_train] seed=${seed} dataset=${dataset}" \
-					"algo=${algo}: exited abnormally (exit ${code});" \
-					"consecutive failures=${fails}/${MAX_CONSECUTIVE_FAILS}."
-				if [ "${fails}" -ge "${MAX_CONSECUTIVE_FAILS}" ]; then
-					echo "[run_train] too many consecutive failures; aborting."
-					exit "${code}"
+			for use_class in "${USE_CLASS_VALUES[@]}"; do
+				if [ "${use_class}" -eq 1 ]; then
+					USE_CLASS_FLAG="--use-class"
+				else
+					USE_CLASS_FLAG="--no-use-class"
 				fi
-			fi
+
+				echo "######################################################################"
+				echo "[run_train] === seed=${seed} dataset=${dataset} algo=${algo} use_class=${use_class} ==="
+				echo "######################################################################"
+
+				fails=0
+				# shellcheck disable=SC2086
+				"${PYTHON}" train.py \
+					--algo "${algo}" \
+					--dataset-name "${dataset}" \
+					--seed "${seed}" \
+					--epochs "${EPOCHS}" \
+					--eval-freq "${EVAL_FREQ}" \
+					--num-eval "${NUM_EVAL_EPISODES}" \
+					--goal-tol "${GOAL_TOL}" \
+					${USE_CLASS_FLAG} \
+					${EXTRA_ARGS}
+				code=$?
+
+				if [ "${code}" -eq 0 ]; then
+					fails=0
+					echo "[run_train] seed=${seed} dataset=${dataset}" \
+						"algo=${algo} use_class=${use_class}: finished cleanly."
+				elif [ "${code}" -eq 130 ]; then
+					echo "[run_train] interrupted by user (Ctrl-C). stopping."
+					exit 130
+				else
+					fails=$((fails + 1))
+					echo "[run_train] seed=${seed} dataset=${dataset}" \
+						"algo=${algo} use_class=${use_class}: exited abnormally (exit ${code});" \
+						"consecutive failures=${fails}/${MAX_CONSECUTIVE_FAILS}."
+					if [ "${fails}" -ge "${MAX_CONSECUTIVE_FAILS}" ]; then
+						echo "[run_train] too many consecutive failures; aborting."
+						exit "${code}"
+					fi
+				fi
+			done
 		done
 	done
 done
@@ -120,5 +122,4 @@ echo "[run_train] all jobs finished. done."
 "${PYTHON}" notify_train.py \
 	--seeds ${MAZE_SEEDS} \
 	--algos "${MAZE_ALGOS[@]}" \
-	--datasets "${DATASETS[@]}" \
-	${USE_CLASS_FLAG}
+	--datasets "${DATASETS[@]}"
