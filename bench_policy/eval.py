@@ -25,7 +25,6 @@ from utils.common import (
 )
 from utils.data import MazeWindowDataset
 from utils.policy import build_policy
-from utils.feishu import send_feishu_eval_notification
 
 
 class EvalMazeIL:
@@ -103,15 +102,6 @@ class EvalMazeIL:
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         print(f"[eval] result saved to {result_path}")
-
-        send_feishu_eval_notification(
-            REPO_DIR,
-            algo=self.args.algo,
-            dataset_name=self.args.dataset_name,
-            seed=self.args.seed,
-            summary=summary,
-            run_name=self.run_name,
-        )
         return result
 
 

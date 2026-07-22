@@ -13,9 +13,9 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from utils.policy.helper.conditional_unet1d import ConditionalUnet1D
+from utils.policy.helper.ddpm_scheduler import build_ddpm_scheduler
 
 
 @dataclass
@@ -75,12 +75,7 @@ class DpModel(nn.Module):
             n_groups=self.cfg.n_groups,
         )
         self.num_diffusion_iters = int(self.cfg.num_diffusion_iters)
-        self.noise_scheduler = DDPMScheduler(
-            num_train_timesteps=self.num_diffusion_iters,
-            beta_schedule="squaredcos_cap_v2",
-            clip_sample=True,
-            prediction_type="epsilon",
-        )
+        self.noise_scheduler = build_ddpm_scheduler(self.num_diffusion_iters)
 
     @staticmethod
     def _normalize_map(maps: torch.Tensor) -> torch.Tensor:

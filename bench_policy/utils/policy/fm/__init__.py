@@ -6,4 +6,6 @@
 # Date  : 2026-07-22
 ################################################################
 
-"""Shared helpers for IL policies (DETR, ConditionalUnet1D, DDPM, FM, etc.)."""
+from utils.policy.fm.policy import FmPolicy
+
+__all__ = ["FmPolicy"]

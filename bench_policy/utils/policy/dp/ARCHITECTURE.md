@@ -20,10 +20,7 @@ flowchart TB
 
   subgraph helper["helper/"]
     UNet["ConditionalUnet1D"]
-  end
-
-  subgraph ext["diffusers"]
-    Sched["DDPMScheduler"]
+    Sched["build_ddpm_scheduler"]
   end
 
   IB --> Pol
@@ -42,6 +39,7 @@ flowchart TB
 | `loss.py` | `dp_noise_mse_loss`：ε̂ 与 ε 的 MSE |
 | `optim.py` | AdamW（ManiSkill DP 默认 betas / weight decay） |
 | `helper/conditional_unet1d.py` | FiLM 条件 1D UNet |
+| `helper/ddpm_scheduler.py` | 自实现 `DDPMScheduler` / `build_ddpm_scheduler`（无 diffusers） |
 
 ## 数据流（训练 / 推理）
 
@@ -85,7 +83,7 @@ flowchart LR
 ```
 
 - **训练**：对 GT action 加噪 → UNet 预测噪声 → MSE；单次前向。
-- **推理**：从高斯噪声出发，按 `DDPMScheduler.timesteps` 迭代去噪，得到 `(B, pred_horizon, action_dim)`。
+- **推理**：从高斯噪声出发，按 scheduler `timesteps` 迭代去噪，得到 `(B, pred_horizon, action_dim)`。
 
 ## DpModel 内部
 
@@ -97,7 +95,7 @@ flowchart TB
   Cond -->|"FiLM global_cond"| UNet
   TS["timestep"] -->|"sinusoidal embed"| UNet
   UNet --> Eps["ε̂"]
-  Sched["DDPMScheduler · 100 steps · ε-pred"] -.->|"train: add_noise / infer: step"| XA
+  Sched["build_ddpm_scheduler · 100 steps · ε-pred"] -.->|"train: add_noise / infer: step"| XA
 ```
 
-默认超参见 `DpModelConfig`：`unet_dims=(64,128,256)`，`num_diffusion_iters=100`，`prediction_type=epsilon`，`beta_schedule=squaredcos_cap_v2`。
+默认超参见 `DpModelConfig`：`unet_dims=(64,128,256)`，`num_diffusion_iters=100`；调度器由 `helper.ddpm_scheduler.build_ddpm_scheduler` 提供（ε-pred，`squaredcos_cap_v2`，`clip_sample`）。

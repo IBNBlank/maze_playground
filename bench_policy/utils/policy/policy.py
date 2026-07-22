@@ -91,8 +91,13 @@ def build_policy(
             action_dim,
             device=device,
         )
-    # elif algo == "fm":
-    #     from .fm.policy import FmPolicy
-    #     return FmPolicy(obs_horizon, pred_horizon, state_dim,
-    #                    action_dim, device=device)
+    if algo == "fm":
+        from .fm.policy import FmPolicy
+        return FmPolicy(
+            obs_horizon,
+            pred_horizon,
+            state_dim,
+            action_dim,
+            device=device,
+        )
     raise ValueError(f"Unknown algo={algo}")
