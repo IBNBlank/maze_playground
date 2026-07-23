@@ -45,7 +45,7 @@ def _post_feishu_card(
     webhook_url: str,
     *,
     title: str,
-    markdown: str,
+    elements: Sequence[dict],
     template: str = "green",
 ) -> bool:
     payload = json.dumps(
@@ -56,16 +56,12 @@ def _post_feishu_card(
                 "header": {
                     "title": {
                         "tag": "plain_text",
+                        # Feishu bot custom keyword must appear in the message.
                         "content": title,
                     },
                     "template": template,
                 },
-                "body": {
-                    "elements": [{
-                        "tag": "markdown",
-                        "content": markdown,
-                    }],
-                },
+                "body": {"elements": list(elements)},
             },
         },
         ensure_ascii=False,
@@ -95,14 +91,12 @@ def send_feishu_notification(
     *,
     mode: str = "train",
     title: Optional[str] = None,
-    markdown: str,
+    markdown: Optional[str] = None,
+    elements: Optional[Sequence[dict]] = None,
     success_rate: Optional[float] = None,
     template: Optional[str] = None,
-    enabled: bool = True,
 ) -> bool:
-    """Push an interactive Feishu card via ``feishu.json`` webhooks."""
-    if not enabled:
-        return False
+    """Wrap content into a Feishu interactive card and POST it."""
     mode = mode.lower()
     if mode not in ("train", "eval"):
         raise ValueError(f"mode must be 'train' or 'eval', got {mode!r}")
@@ -123,10 +117,17 @@ def send_feishu_notification(
         template = (_feishu_template_from_success(float(success_rate))
                     if success_rate is not None else "green")
 
+    if elements is not None:
+        body = list(elements)
+    elif markdown is not None:
+        body = [{"tag": "markdown", "content": markdown}]
+    else:
+        raise ValueError("either markdown or elements must be provided")
+
     return _post_feishu_card(
         webhook_url,
         title=title,
-        markdown=markdown,
+        elements=body,
         template=template,
     )
 
@@ -140,7 +141,6 @@ def send_feishu_train_notification(
     epochs: int,
     metrics: "Metrics",
     run_name: Optional[str] = None,
-    enabled: bool = True,
 ) -> bool:
     """Notify after one training run finishes."""
     md_lines = [
@@ -159,7 +159,6 @@ def send_feishu_train_notification(
         mode="train",
         markdown="\n".join(md_lines),
         success_rate=metrics.best_success_rate,
-        enabled=enabled,
     )
 
 
@@ -169,7 +168,6 @@ def send_feishu_train_sweep_notification(
     seeds: Sequence[Any],
     algos: Sequence[str],
     dataset_names: Sequence[str],
-    enabled: bool = True,
 ) -> bool:
     """Notify after a full ``run_train.sh`` sweep finishes."""
     if not seeds or not algos or not dataset_names:
@@ -177,26 +175,14 @@ def send_feishu_train_sweep_notification(
         return False
     md = (f"- **datasets:** {' '.join(str(d) for d in dataset_names)}\n"
           f"- **seeds:** {' '.join(str(s) for s in seeds)}\n"
-          f"- **algos:** {' '.join(str(a) for a in algos)}\n"
-          f"- **use_class:** 0 1")
+          f"- **algos:** {' '.join(str(a) for a in algos)}")
     return send_feishu_notification(
         repo_dir,
         mode="train",
         title="Maze Training Finished",
         markdown=md,
         template="green",
-        enabled=enabled,
     )
-
-
-def _fmt_steps(value: Any) -> str:
-    try:
-        steps = float(value)
-    except (TypeError, ValueError):
-        return "n/a"
-    if steps != steps or steps == float("inf"):
-        return "n/a"
-    return f"{steps:.2f}"
 
 
 def collect_eval_results(
@@ -205,10 +191,7 @@ def collect_eval_results(
     dataset_names: Sequence[str],
     algos: Sequence[str],
 ) -> list[dict]:
-    """Load existing ``eval_result.json`` files for a sweep grid.
-
-    Covers both ``use_class=0/1`` run dirs; missing / invalid results are skipped.
-    """
+    """Load ``eval_result.json`` for the sweep grid (obs + priv)."""
     results: list[dict] = []
     root = Path(runs_dir)
     for seed in seeds:
@@ -245,61 +228,201 @@ def collect_eval_results(
     return results
 
 
+def _fmt_rate(rate: Optional[float]) -> str:
+    if rate is None:
+        return "-"
+    return f"{rate * 100:.1f}%"
+
+
+def _rate_color(rate: Optional[float]) -> str:
+    if rate is None:
+        return "grey"
+    if rate <= 0.5:
+        return "red"
+    if rate <= 0.8:
+        return "yellow"
+    return "green"
+
+
+def _option_cell(rate: Optional[float]) -> list[dict]:
+    return [{"text": _fmt_rate(rate), "color": _rate_color(rate)}]
+
+
+def _mean(rates) -> Optional[float]:
+    rates = [r for r in rates if r is not None]
+    if not rates:
+        return None
+    return sum(rates) / len(rates)
+
+
+def _index_results(results: Sequence[dict]) -> dict[tuple, dict]:
+    return {
+        (str(r["seed"]), str(r["dataset_name"]), str(r["algo"]),
+         bool(r["use_class"])): r
+        for r in results
+    }
+
+
+def _success_rate(index, algo, dataset, seed, use_class) -> Optional[float]:
+    row = index.get((str(seed), str(dataset), str(algo), bool(use_class)))
+    return None if row is None else float(row["success_rate"])
+
+
+def _row_specs(algos: Sequence[str]) -> list[tuple[str, str, str, bool]]:
+    """(row_key, display_label, algo, use_class) — labels follow run_name."""
+    specs = []
+    for algo in algos:
+        specs.append((f"row_{algo}", algo, algo, False))
+        specs.append((f"row_priv_{algo}", f"priv_{algo}", algo, True))
+    return specs
+
+
+def _feishu_table(columns: list[dict], rows: list[dict]) -> dict:
+    return {
+        "tag": "table",
+        "row_height": "low",
+        "header_style": {"background_style": "grey", "bold": True},
+        "columns": columns,
+        "rows": rows,
+    }
+
+
+def _text_col(name: str, display_name: str) -> dict:
+    return {
+        "name": name,
+        "display_name": display_name,
+        "data_type": "text",
+        "horizontal_align": "left",
+    }
+
+
+def _opt_col(name: str, display_name: str) -> dict:
+    return {
+        "name": name,
+        "display_name": display_name,
+        "data_type": "options",
+        "horizontal_align": "center",
+    }
+
+
+def _cell_rate(index, algo, dataset, use_class, seeds) -> Optional[float]:
+    """Mean over ``seeds`` (pass a single-seed list for per-seed tables)."""
+    return _mean(
+        _success_rate(index, algo, dataset, s, use_class) for s in seeds)
+
+
+def _algo_dataset_table(index, algos, datasets, seeds):
+    """Rows=algo (bc/priv_bc/...), cols=dataset; values mean over ``seeds``."""
+    specs = _row_specs(algos)
+    columns = [_text_col("algo", "algo \\ dataset")]
+    for ds in datasets:
+        columns.append(_opt_col(f"ds_{ds}", str(ds)))
+
+    rows = []
+    for _, label, algo, use_class in specs:
+        row: dict[str, Any] = {"algo": label}
+        for ds in datasets:
+            rate = _cell_rate(index, algo, ds, use_class, seeds)
+            row[f"ds_{ds}"] = _option_cell(rate)
+        rows.append(row)
+    return _feishu_table(columns, rows)
+
+
+def _algo_dataset_text(index, algos, datasets, seeds):
+    specs = _row_specs(algos)
+    lines = ["algo \\ dataset | " + " | ".join(str(d) for d in datasets)]
+    for _, label, algo, use_class in specs:
+        cells = [
+            _fmt_rate(_cell_rate(index, algo, ds, use_class, seeds))
+            for ds in datasets
+        ]
+        lines.append(f"{label} | " + " | ".join(cells))
+    return "\n".join(lines)
+
+
+def format_eval_sweep_markdown(
+    seeds: Sequence[Any],
+    algos: Sequence[str],
+    dataset_names: Sequence[str],
+    results: Sequence[dict],
+) -> tuple[str, Optional[float]]:
+    """Build console-friendly eval-sweep markdown + mean success."""
+    index = _index_results(results)
+    expected = len(seeds) * len(dataset_names) * len(algos) * 2
+    mean_rate = _mean(float(r["success_rate"]) for r in results)
+    overall_text = _algo_dataset_text(index, algos, dataset_names, seeds)
+
+    parts = [
+        f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",
+        f"- **seeds:** {' '.join(str(s) for s in seeds)}",
+        f"- **algos:** {' '.join(str(a) for a in algos)}",
+        f"- **completed:** {len(results)}/{expected}",
+        f"- **mean_success:** {_fmt_rate(mean_rate)}",
+        "",
+        "**1. Overall** (mean over seeds)",
+        overall_text,
+    ]
+    for seed in seeds:
+        text = _algo_dataset_text(index, algos, dataset_names, [seed])
+        parts.append("")
+        parts.append(f"**2. Seed {seed}**")
+        parts.append(text)
+    return "\n".join(parts), mean_rate
+
+
+def _build_eval_sweep_elements(
+    seeds: Sequence[Any],
+    algos: Sequence[str],
+    dataset_names: Sequence[str],
+    results: Sequence[dict],
+) -> tuple[list[dict], Optional[float]]:
+    """Build Feishu card: overall table + one table per seed."""
+    index = _index_results(results)
+    expected = len(seeds) * len(dataset_names) * len(algos) * 2
+    mean_rate = _mean(float(r["success_rate"]) for r in results)
+
+    summary = (f"- **datasets:** {' '.join(str(d) for d in dataset_names)}\n"
+               f"- **seeds:** {' '.join(str(s) for s in seeds)}\n"
+               f"- **algos:** {' '.join(str(a) for a in algos)}\n"
+               f"- **completed:** {len(results)}/{expected}\n"
+               f"- **mean_success:** {_fmt_rate(mean_rate)}")
+
+    elements: list[dict] = [
+        {"tag": "markdown", "content": summary},
+        {
+            "tag": "markdown",
+            "content": "**1. Overall** (mean over seeds)",
+        },
+        _algo_dataset_table(index, algos, dataset_names, seeds),
+    ]
+    for seed in seeds:
+        elements.append({
+            "tag": "markdown",
+            "content": f"**2. Seed {seed}**",
+        })
+        elements.append(
+            _algo_dataset_table(index, algos, dataset_names, [seed]))
+    return elements, mean_rate
+
+
 def send_feishu_eval_sweep_notification(
     repo_dir: str,
     *,
     seeds: Sequence[Any],
     algos: Sequence[str],
     dataset_names: Sequence[str],
-    results: Optional[Sequence[dict]] = None,
-    enabled: bool = True,
+    results: Sequence[dict],
 ) -> bool:
-    """Notify after a full ``run_eval.sh`` sweep finishes (aggregate summary)."""
+    """Notify after a full ``run_eval.sh`` sweep from collected results."""
     if not seeds or not algos or not dataset_names:
         print("[feishu] empty eval sweep; nothing to notify")
         return False
-
-    expected = len(seeds) * len(dataset_names) * len(algos) * 2
-    rows = list(results) if results is not None else []
-    success_rates = [float(r["success_rate"]) for r in rows]
-    collision_rates = [
-        float(r["collision_rate"]) for r in rows
-        if float(r["collision_rate"]) == float(r["collision_rate"])
-    ]
-    mean_success = (float(sum(success_rates) / len(success_rates))
-                    if success_rates else None)
-    mean_collision = (float(sum(collision_rates) / len(collision_rates))
-                      if collision_rates else None)
-
-    md_lines = [
-        f"- **datasets:** {' '.join(str(d) for d in dataset_names)}",
-        f"- **seeds:** {' '.join(str(s) for s in seeds)}",
-        f"- **algos:** {' '.join(str(a) for a in algos)}",
-        f"- **use_class:** 0 1",
-        f"- **completed:** {len(rows)}/{expected}",
-    ]
-    if mean_success is not None:
-        md_lines.append(f"- **mean_success_rate:** {mean_success * 100:.2f}%")
-    if mean_collision is not None:
-        md_lines.append(
-            f"- **mean_collision_rate:** {mean_collision * 100:.2f}%")
-
-    if rows:
-        md_lines.append("")
-        md_lines.append("**per-run**")
-        for r in rows:
-            md_lines.append(
-                f"- `{r['run_name']}`: "
-                f"succ={float(r['success_rate']) * 100:.2f}% "
-                f"coll={float(r['collision_rate']) * 100:.2f}% "
-                f"steps={_fmt_steps(r.get('success_average_steps'))}"
-            )
-
+    elements, mean_rate = _build_eval_sweep_elements(
+        seeds, algos, dataset_names, results)
     return send_feishu_notification(
         repo_dir,
         mode="eval",
         title="Maze Evaluation Finished",
-        markdown="\n".join(md_lines),
-        success_rate=mean_success,
-        enabled=enabled,
+        elements=elements,
+        success_rate=mean_rate,
     )

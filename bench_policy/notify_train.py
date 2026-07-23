@@ -29,6 +29,14 @@ class NotifyTrainArgs:
 
 def main():
     args = tyro.cli(NotifyTrainArgs)
+    if not args.seeds or not args.algos or not args.datasets:
+        print("[notify_train] no seeds/algos/datasets; nothing to notify.")
+        sys.exit(0)
+
+    print("[notify_train] sweep summary:")
+    print(f"  datasets: {' '.join(args.datasets)}")
+    print(f"  seeds: {' '.join(args.seeds)}")
+    print(f"  algos: {' '.join(args.algos)}")
     send_feishu_train_sweep_notification(
         REPO_DIR,
         seeds=args.seeds,

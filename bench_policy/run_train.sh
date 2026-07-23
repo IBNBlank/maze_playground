@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Batch training wrapper for train.py (TrainArgs CLI).
+# Batch training wrapper for train.py + notify_train.py.
 #
 # Nested schedule order: seed -> dataset -> algo -> use_class.
 #
+# After the sweep, sends one Feishu summary card.
+#
 # Usage:
 #   ./run_train.sh
-#   DATASET_NAME=genplan256_r4 MAZE_ALGOS="bc" MAZE_SEEDS="1 2" \
+#   DATASET_NAME=genplan256_r2 MAZE_ALGOS="bc" MAZE_SEEDS="1 2" \
 #     EPOCHS=50 ./run_train.sh
 #
 # Tunables (env vars):
 #   PYTHON                 : python interpreter (default: active venv, else repo .venv)
 #   DATASET_NAME           : if set, run that single dataset only
-#   MAZE_ALGOS             : space-separated algos (default: bc)
-#   MAZE_SEEDS             : space-separated seeds (default: 42)
-#   EPOCHS                 : training epochs (default: 200)
+#   MAZE_ALGOS             : space-separated algos (default: bc act dp fm)
+#   MAZE_SEEDS             : space-separated seeds (default: 14 28 42)
+#   EPOCHS                 : training epochs (default: 500)
 #   EVAL_FREQ              : eval every N epochs (default: 5)
 #   NUM_EVAL_EPISODES      : mid-train eval episodes; 0 = full epoch
-#                            (default: 1000)
+#                            (default: 500)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
@@ -116,10 +118,13 @@ for seed in ${MAZE_SEEDS}; do
 	done
 done
 
-echo "[run_train] all jobs finished. done."
-
+echo "######################################################################"
+echo "[run_train] sending Feishu notification..."
+echo "######################################################################"
 # shellcheck disable=SC2086
 "${PYTHON}" notify_train.py \
 	--seeds ${MAZE_SEEDS} \
 	--algos "${MAZE_ALGOS[@]}" \
 	--datasets "${DATASETS[@]}"
+
+echo "[run_train] all jobs finished. done."
