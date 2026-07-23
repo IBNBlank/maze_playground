@@ -139,8 +139,8 @@ def inflate_occupancy(occupancy: np.ndarray, radius: int) -> np.ndarray:
     radius = int(radius)
     if radius <= 0:
         return occ.astype(bool)
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                       (2 * radius + 1, 2 * radius + 1))
     return cv2.dilate(occ, kernel).astype(bool)
 
 
@@ -247,11 +247,13 @@ def evaluate(
         size = int(occupancy.shape[0])
         scale = float(size - 1)
         cur = np.array(
-            [float(ep["start_rc"][1]), float(ep["start_rc"][0])],
+            [float(ep["start_rc"][1]),
+             float(ep["start_rc"][0])],
             dtype=np.float64,
         )
         goal = np.array(
-            [float(ep["goal_rc"][1]), float(ep["goal_rc"][0])],
+            [float(ep["goal_rc"][1]),
+             float(ep["goal_rc"][0])],
             dtype=np.float64,
         )
         record = want_preview and len(preview_tiles) < int(preview_count)
@@ -274,8 +276,8 @@ def evaluate(
             with torch.no_grad():
                 chunk = policy.infer_batch({
                     "map":
-                    torch.from_numpy(occupancy.astype(np.float32)[None]).to(
-                        device),
+                    torch.from_numpy(occupancy.astype(
+                        np.float32)[None]).to(device),
                     "state":
                     torch.from_numpy(state[None]).to(device),
                 })[0].detach().cpu().numpy()[:horizon]
@@ -297,8 +299,9 @@ def evaluate(
                     if path is not None:
                         for a2 in chunk[ai + 1:]:
                             cur = np.clip(
-                                cur + np.clip(a2.astype(np.float64), -1.0, 1.0)
-                                * max_abs_delta,
+                                cur +
+                                np.clip(a2.astype(np.float64), -1.0, 1.0) *
+                                max_abs_delta,
                                 0.0,
                                 size - 1,
                             )
@@ -361,14 +364,44 @@ def _to_cpu_tree(obj: Any) -> Any:
     return obj
 
 
+def _prune_regular_ckpts(run_dir: str, keep: int = 5) -> None:
+    """Keep only the newest ``keep`` regular ``ckpt_*.pt`` files under ``run_dir``.
+
+    Does not touch ``final_ckpt.pt`` / ``best_success_ckpt.pt``.
+    """
+    if keep < 0:
+        return
+    numbered: list[tuple[int, str]] = []
+    for name in os.listdir(run_dir):
+        if not (name.startswith("ckpt_") and name.endswith(".pt")):
+            continue
+        mid = name[len("ckpt_"):-len(".pt")]
+        if not mid.isdigit():
+            continue
+        numbered.append((int(mid), name))
+    numbered.sort(key=lambda x: x[0], reverse=True)
+    for _, name in numbered[keep:]:
+        path = os.path.join(run_dir, name)
+        try:
+            os.remove(path)
+            tqdm.tqdm.write(f"ckpt pruned: {path}")
+        except OSError as e:
+            tqdm.tqdm.write(f"ckpt prune failed: {path} ({e})")
+
+
 def save(
     policy,
     run_name: str,
     metrics: Metrics,
     iteration: int,
     is_best: bool = False,
+    keep_ckpts: int = 5,
 ) -> str:
-    """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best."""
+    """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best.
+
+    Regular numbered checkpoints are pruned to the newest ``keep_ckpts``
+    (``final_ckpt.pt`` / ``best_success_ckpt.pt`` are always retained).
+    """
     model = getattr(policy, "model", None)
     optimizer = getattr(policy, "optimizer", None)
     if model is None:
@@ -403,6 +436,9 @@ def save(
     if is_best:
         shutil.copy(ckpt_path, f"{run_dir}/best_success_ckpt.pt")
         shutil.copy(latest_json, f"{run_dir}/best_success.json")
+
+    if int(iteration) >= 0:
+        _prune_regular_ckpts(run_dir, keep=keep_ckpts)
 
     tqdm.tqdm.write(f"ckpt saved to {ckpt_path}")
     return ckpt_path
