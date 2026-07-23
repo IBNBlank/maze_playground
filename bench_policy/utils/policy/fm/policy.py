@@ -19,7 +19,7 @@ class FmPolicy(PolicyBase):
     """Conditional flow-matching action-chunking policy."""
 
     lr: float = 2e-4
-    ema_decay: float = 0.999
+    ema_decay: float = 0.995
 
     def __init__(
         self,

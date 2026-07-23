@@ -19,7 +19,7 @@ class BcPolicy(PolicyBase):
     """MSE behavior cloning with ConditionalUnet1D (learnable action query)."""
 
     lr: float = 3e-4
-    ema_decay: float = 0.999
+    ema_decay: float = 0.995
 
     def __init__(
         self,

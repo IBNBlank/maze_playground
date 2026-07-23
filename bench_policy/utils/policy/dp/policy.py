@@ -19,7 +19,7 @@ class DpPolicy(PolicyBase):
     """Conditional DDPM action-chunking policy (Diffusion Policy)."""
 
     lr: float = 2e-4
-    ema_decay: float = 0.999
+    ema_decay: float = 0.995
 
     def __init__(
         self,

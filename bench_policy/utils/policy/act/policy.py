@@ -20,7 +20,7 @@ class ActPolicy(PolicyBase):
 
     lr: float = 2e-4
     kl_weight: float = 5.0
-    ema_decay: float = 0.999
+    ema_decay: float = 0.995
 
     def __init__(
         self,
