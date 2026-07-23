@@ -37,8 +37,8 @@ class ActModel(nn.Module):
     ``global_cond``. CVAE ``z`` is projected into the diffusion-step
     embedding slot (BC keeps that slot at ``t=0``).
 
-    Train: run CVAE on ``(cond, actions)``, use ``μ`` as ``z`` (no
-    reparam sampling). Infer: ``z = 0``.
+    Train: run CVAE on ``(cond, actions)``, sample ``z`` via reparam.
+    Infer: sample ``z ~ N(0, I)``.
     """
 
     def __init__(
@@ -61,8 +61,7 @@ class ActModel(nn.Module):
 
         self.obs_encoder = ObsEncoder(self.obs_horizon, self.state_dim)
         self.action_query = nn.Parameter(
-            torch.zeros(1, self.pred_horizon, self.action_dim),
-        )
+            torch.zeros(1, self.pred_horizon, self.action_dim), )
         nn.init.normal_(self.action_query, std=0.02)
 
         # MLP-CVAE: cat(cond, flat actions) → (μ, logσ²).
@@ -99,10 +98,19 @@ class ActModel(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode ``(cond, actions)`` → ``(mu, logvar)``."""
         flat_actions = actions.reshape(actions.shape[0], -1)
-        latent_info = self.latent_encoder(torch.cat([cond, flat_actions], dim=-1))
+        latent_info = self.latent_encoder(
+            torch.cat([cond, flat_actions], dim=-1))
         mu = latent_info[:, :self.latent_dim]
         logvar = latent_info[:, self.latent_dim:]
         return mu, logvar
+
+    @staticmethod
+    def _reparameterize(mu: torch.Tensor,
+                        logvar: torch.Tensor) -> torch.Tensor:
+        """Sample ``z ~ N(μ, σ²)`` via ``z = μ + σ ⊙ ε``, ``ε ~ N(0, I)``."""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def forward(
         self,
@@ -124,11 +132,13 @@ class ActModel(nn.Module):
 
         if actions is not None:
             mu, logvar = self._encode_latent(cond, actions)
-            z = mu
+            z = self._reparameterize(mu, logvar)
         else:
             mu = logvar = None
-            z = torch.zeros(
-                batch_size, self.latent_dim, dtype=torch.float32, device=cond.device)
+            z = torch.randn(batch_size,
+                            self.latent_dim,
+                            dtype=torch.float32,
+                            device=cond.device)
 
         sample = self.action_query.expand(batch_size, -1, -1)
         step_embed = self.latent_to_step(z)

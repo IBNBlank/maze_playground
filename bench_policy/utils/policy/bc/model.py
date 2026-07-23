@@ -52,8 +52,7 @@ class BcModel(nn.Module):
 
         self.obs_encoder = ObsEncoder(self.obs_horizon, self.state_dim)
         self.action_query = nn.Parameter(
-            torch.zeros(1, self.pred_horizon, self.action_dim),
-        )
+            torch.zeros(1, self.pred_horizon, self.action_dim), )
         nn.init.normal_(self.action_query, std=0.02)
         self.action_net = ConditionalUnet1D(
             input_dim=self.action_dim,
@@ -68,6 +67,7 @@ class BcModel(nn.Module):
         cond = self.obs_encoder(maps, state)
         batch_size = cond.shape[0]
         sample = self.action_query.expand(batch_size, -1, -1)
-        timesteps = torch.zeros(
-            batch_size, dtype=torch.long, device=cond.device)
+        timesteps = torch.zeros(batch_size,
+                                dtype=torch.long,
+                                device=cond.device)
         return self.action_net(sample, timesteps, global_cond=cond)

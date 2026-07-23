@@ -58,8 +58,11 @@ class ActPolicy(PolicyBase):
 
         self.model.train()
         a_hat, (mu, logvar) = self.model(maps, state, actions=action)
-        loss = self.loss_fn(
-            a_hat, action, mu, logvar, kl_weight=self.kl_weight)
+        loss = self.loss_fn(a_hat,
+                            action,
+                            mu,
+                            logvar,
+                            kl_weight=self.kl_weight)
 
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()

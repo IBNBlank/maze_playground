@@ -54,7 +54,7 @@ flowchart LR
   subgraph train["update_batch"]
     A["action"]
     Post["MLP-CVAE → μ, logσ²"]
-    Z["z = μ · no reparam"]
+    Z["z = μ + σ⊙ε · reparam"]
     Step["latent_to_step(z)"]
     Q["action_query · learnable"]
     Pred["ConditionalUnet1D: â"]
@@ -72,7 +72,7 @@ flowchart LR
   end
 
   subgraph infer["infer_batch"]
-    Z0["z = 0"]
+    Z0["z ~ N(0, I)"]
     Step2["latent_to_step(z)"]
     Q2["action_query · learnable"]
     Dec["ConditionalUnet1D: â"]
@@ -85,8 +85,8 @@ flowchart LR
   end
 ```
 
-- **训练**：跑 CVAE 得 `μ, logσ²`，**直接用 `μ` 作为 `z`**（不 `reparam` 采样）；`λ = kl_weight`（默认 5.0）。
-- **推理**：无 action，取 `z = 0`。
+- **训练**：跑 CVAE 得 `μ, logσ²`，**reparam 采样** `z = μ + σ ⊙ ε`；`λ = kl_weight`（默认 5.0）。
+- **推理**：无 action，从先验采样 `z ~ N(0, I)`。
 - **相对 BC**：UNet `global_cond_dim` 相同；差异在 step 通道由 CVAE `μ` 调制 + KL。
 
 默认超参见 `ActModelConfig`：UNet 与 BC / DP / FM 对齐；CVAE：`latent_dim=32`，`cvae_hidden_dim=256`。`ActPolicy.lr = 2e-4`，`kl_weight = 5.0`。
