@@ -1,6 +1,6 @@
 # Flow Matching (FM) 框架
 
-条件 OT Flow Matching 动作分块策略：观测侧与 BC / ACT / DP 共用 map CNN + state MLP，动作侧为 Conditional 1D UNet + 线性路径 / Euler ODE（相对 DP：监督从 ε 改为速度场，推理从 DDPM 改为 ODE）。
+条件 OT Flow Matching 动作分块策略：观测侧与 BC / ACT / DP 共用 map CNN + state MLP，动作侧为 Conditional 1D UNet + 线性路径 / Euler ODE（相对 DP：监督从 ε 改为速度场，推理从 DDIM 改为 ODE）。
 
 ## 模块分层
 
@@ -16,11 +16,13 @@ flowchart TB
     Mod["model.py · FmModel"]
     Loss["loss.py · fm_velocity_mse_loss"]
     Opt["optim.py · AdamW"]
+    Sched["fm_scheduler"]
   end
 
   subgraph helper["helper/"]
+    Obs["ObsEncoder"]
     UNet["ConditionalUnet1D"]
-    Sched["build_fm_scheduler"]
+    Ema["EMAModel"]
   end
 
   IB --> Pol
@@ -28,18 +30,22 @@ flowchart TB
   Pol --> Mod
   Pol --> Loss
   Pol --> Opt
+  Pol --> Ema
+  Mod --> Obs
   Mod --> UNet
   Mod --> Sched
 ```
 
 | 文件 | 职责 |
 |------|------|
-| `policy.py` | `FmPolicy`：实现 `infer_batch` / `update_batch` |
+| `policy.py` | `FmPolicy`：实现 `infer_batch` / `update_batch` + EMA |
 | `model.py` | `FmModel`：条件编码 + UNet 速度预测 + Euler 采样 |
 | `loss.py` | `fm_velocity_mse_loss`：v̂ 与 v 的 MSE |
 | `optim.py` | AdamW（与 DP 对齐） |
+| `fm_scheduler.py` | OT 路径插值 / 速度目标 / Euler `step` |
+| `helper/obs_encoder.py` | map CNN + state MLP → `cond` |
 | `helper/conditional_unet1d.py` | FiLM 条件 1D UNet（与 DP 共用） |
-| `helper/fm_scheduler.py` | OT 路径插值 / 速度目标 / Euler `step` |
+| `helper/ema.py` | 权重 EMA |
 
 ## 数据流（训练 / 推理）
 
@@ -84,19 +90,19 @@ flowchart LR
 ```
 
 - **训练**：线性插值构造 `x_t` → UNet 预测速度 → MSE；单次前向。
-- **推理**：从噪声出发，Euler 积分数步（默认 10）到 `t=1`，得到 `(B, pred_horizon, action_dim)`。
+- **推理**：从噪声出发，Euler 积分数步（默认 20）到 `t=1`，得到 `(B, pred_horizon, action_dim)`。
 
 ## FmModel 内部
 
 ```mermaid
 flowchart TB
-  In["map + state"] --> Enc["encode_cond"]
+  In["map + state"] --> Enc["ObsEncoder"]
   Enc --> Cond["cond_dim = 1024 + 128"]
   XA["x_t (B, H, A)"] --> UNet["ConditionalUnet1D"]
   Cond -->|"FiLM global_cond"| UNet
   TS["t ∈ [0,1] · ×1000 embed"] -->|"sinusoidal embed"| UNet
   UNet --> Vel["v̂"]
-  Sched["build_fm_scheduler · 10 Euler steps"] -.->|"train: interpolate / infer: step"| XA
+  Sched["build_fm_scheduler · 20 Euler steps"] -.->|"train: interpolate / infer: step"| XA
 ```
 
-默认超参见 `FmModelConfig`：`unet_dims=(64,128,256)`（与 DP 同骨干），`num_inference_steps=10`；路径为 OT / rectified-flow：`x_t=(1-t)x_0+t x_1`，`v=x_1-x_0`。
+默认超参见 `FmModelConfig`：`unet_dims=(64,128,256)`（与 DP 同骨干），`num_inference_steps=20`；路径为 OT / rectified-flow：`x_t=(1-t)x_0+t x_1`，`v=x_1-x_0`。调度器由 `fm.fm_scheduler.build_fm_scheduler` 提供。

@@ -6,4 +6,4 @@
 # Date  : 2026-07-22
 ################################################################
 
-"""Shared helpers for IL policies (ObsEncoder, ConditionalUnet1D, DDPM, FM, etc.)."""
+"""Shared helpers for IL policies (ObsEncoder, ConditionalUnet1D, EMA, etc.)."""

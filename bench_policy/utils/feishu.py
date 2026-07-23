@@ -31,12 +31,13 @@ def _load_feishu_config(repo_dir: str) -> Optional[dict]:
         return None
 
 
-def _feishu_template_from_success(success_rate: float) -> str:
-    if success_rate != success_rate:  # NaN
+def _rate_color(rate: Optional[float]) -> str:
+    """Map success rate to a Feishu color (card template / table cell)."""
+    if rate is None or rate != rate:  # None or NaN
         return "grey"
-    if success_rate <= 0.5:
+    if rate <= 0.5:
         return "red"
-    if success_rate <= 0.8:
+    if rate <= 0.8:
         return "yellow"
     return "green"
 
@@ -114,7 +115,7 @@ def send_feishu_notification(
         title = ("Maze Training Finished"
                  if mode == "train" else "Maze Evaluation Finished")
     if template is None:
-        template = (_feishu_template_from_success(float(success_rate))
+        template = (_rate_color(float(success_rate))
                     if success_rate is not None else "green")
 
     if elements is not None:
@@ -232,16 +233,6 @@ def _fmt_rate(rate: Optional[float]) -> str:
     if rate is None:
         return "-"
     return f"{rate * 100:.1f}%"
-
-
-def _rate_color(rate: Optional[float]) -> str:
-    if rate is None:
-        return "grey"
-    if rate <= 0.5:
-        return "red"
-    if rate <= 0.8:
-        return "yellow"
-    return "green"
 
 
 def _option_cell(rate: Optional[float]) -> list[dict]:

@@ -21,6 +21,7 @@ flowchart TB
   subgraph helper["helper/"]
     Obs["ObsEncoder"]
     UNet["ConditionalUnet1D"]
+    Ema["EMAModel"]
   end
 
   IB --> Pol
@@ -28,16 +29,20 @@ flowchart TB
   Pol --> Mod
   Pol --> Loss
   Pol --> Opt
+  Pol --> Ema
   Mod --> Obs
   Mod --> UNet
 ```
 
 | 文件 | 职责 |
 |------|------|
-| `policy.py` | `ActPolicy`：实现 `infer_batch` / `update_batch` |
+| `policy.py` | `ActPolicy`：实现 `infer_batch` / `update_batch` + EMA |
 | `model.py` | `ActModel`：ObsEncoder + MLP-CVAE `z=μ→step_embed` + ConditionalUnet1D |
 | `loss.py` | `act_loss`：`MSE + kl_weight * KL(mu, logvar)` |
 | `optim.py` | AdamW |
+| `helper/obs_encoder.py` | map CNN + state MLP → `cond` |
+| `helper/conditional_unet1d.py` | FiLM 条件 1D UNet |
+| `helper/ema.py` | 权重 EMA |
 
 ## 数据流（训练 / 推理）
 

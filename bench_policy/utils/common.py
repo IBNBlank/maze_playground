@@ -368,9 +368,9 @@ def _prune_regular_ckpts(run_dir: str, keep: int = 5) -> None:
     """Keep only the newest ``keep`` regular ``ckpt_*.pt`` files under ``run_dir``.
 
     Does not touch ``final_ckpt.pt`` / ``best_success_ckpt.pt``.
+    ``keep`` must be >= 1 so the just-written numbered ckpt is never pruned away.
     """
-    if keep < 0:
-        return
+    keep = max(1, int(keep))
     numbered: list[tuple[int, str]] = []
     for name in os.listdir(run_dir):
         if not (name.startswith("ckpt_") and name.endswith(".pt")):
@@ -400,7 +400,8 @@ def save(
     """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best.
 
     Regular numbered checkpoints are pruned to the newest ``keep_ckpts``
-    (``final_ckpt.pt`` / ``best_success_ckpt.pt`` are always retained).
+    (clamped to >= 1). ``final_ckpt.pt`` / ``best_success_ckpt.pt`` are always
+    retained.
     """
     model = getattr(policy, "model", None)
     optimizer = getattr(policy, "optimizer", None)

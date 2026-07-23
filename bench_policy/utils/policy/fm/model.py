@@ -14,8 +14,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
+from utils.policy.fm.fm_scheduler import build_fm_scheduler
 from utils.policy.helper.conditional_unet1d import ConditionalUnet1D
-from utils.policy.helper.fm_scheduler import build_fm_scheduler
 from utils.policy.helper.obs_encoder import ObsEncoder
 
 

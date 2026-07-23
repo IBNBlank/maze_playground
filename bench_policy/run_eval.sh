@@ -67,11 +67,12 @@ for seed in ${MAZE_SEEDS}; do
 			for use_class in "${USE_CLASS_VALUES[@]}"; do
 				if [ "${use_class}" -eq 1 ]; then
 					USE_CLASS_FLAG="--use-class"
-					run_name="priv_seed${seed}_${dataset}_${algo}"
 				else
 					USE_CLASS_FLAG="--no-use-class"
-					run_name="seed${seed}_${dataset}_${algo}"
 				fi
+				run_name="$("${PYTHON}" -c \
+					"from utils.common import make_run_name; \
+print(make_run_name(${seed}, '${dataset}', '${algo}', use_class=bool(${use_class})))")"
 				ckpt="runs/${run_name}/${MAZE_CKPT_NAME}"
 				echo "######################################################################"
 				echo "[run_eval] === seed=${seed} dataset=${dataset}" \

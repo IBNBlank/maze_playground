@@ -10,7 +10,6 @@ import json, os, sys, tyro
 from pathlib import Path
 
 import numpy as np
-import torch
 import tqdm
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -148,12 +147,6 @@ class TrainMazeIL:
             batch = self.dataset.get_batch()
             if batch is None:
                 break
-            batch = {
-                k:
-                v.to(self.device, non_blocking=True)
-                if torch.is_tensor(v) else v
-                for k, v in batch.items()
-            }
             loss_val = float(self.policy.update_batch(batch))
             loss_sum += loss_val
             n_steps += 1

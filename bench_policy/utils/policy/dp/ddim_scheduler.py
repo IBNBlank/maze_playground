@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import torch
 
-from utils.policy.helper.ddpm_scheduler import _betas_squaredcos_cap_v2
+from utils.policy.dp.ddpm_scheduler import _betas_squaredcos_cap_v2
 
 
 @dataclass

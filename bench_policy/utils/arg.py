@@ -45,8 +45,6 @@ class TrainArgs(_SharedArgs):
     # eval
     eval_freq: int = 5
     """evaluation frequency in epochs (0 = only final)"""
-    goal_tol: float = 1.0
-    """pixel L2 distance threshold for success (error < goal_tol)"""
 
 
 @dataclass

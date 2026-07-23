@@ -14,9 +14,9 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
+from utils.policy.dp.ddim_scheduler import build_ddim_scheduler
+from utils.policy.dp.ddpm_scheduler import build_ddpm_scheduler
 from utils.policy.helper.conditional_unet1d import ConditionalUnet1D
-from utils.policy.helper.ddim_scheduler import build_ddim_scheduler
-from utils.policy.helper.ddpm_scheduler import build_ddpm_scheduler
 from utils.policy.helper.obs_encoder import ObsEncoder
 
 
