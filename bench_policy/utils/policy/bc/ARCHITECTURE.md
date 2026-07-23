@@ -1,6 +1,6 @@
 # Behavior Cloning (BC) 框架
 
-确定性 DETR 动作分块策略：观测侧与 ACT / DP 共用 map CNN + state MLP，动作侧为 DETRVAE（`encoder=None`，潜变量固定 `z=0`），对 action chunk 做 MSE。
+确定性 ConditionalUnet1D 动作分块策略：观测侧与 ACT / DP / FM 共用 map CNN + state MLP，动作侧以 learnable action query 作为 UNet 输入、以 `obs_encoder` 输出为 FiLM 条件，对 action chunk 做 MSE。
 
 ## 模块分层
 
@@ -18,9 +18,9 @@ flowchart TB
     Opt["optim.py · AdamW"]
   end
 
-  subgraph helper["helper/detr/"]
-    DETR["DETRVAE · encoder=None"]
-    Tr["build_transformer"]
+  subgraph helper["helper/"]
+    Obs["ObsEncoder"]
+    UNet["ConditionalUnet1D"]
   end
 
   IB --> Pol
@@ -28,17 +28,16 @@ flowchart TB
   Pol --> Mod
   Pol --> Loss
   Pol --> Opt
-  Mod --> DETR
-  DETR --> Tr
+  Mod --> Obs
+  Mod --> UNet
 ```
 
 | 文件 | 职责 |
 |------|------|
 | `policy.py` | `BcPolicy`：实现 `infer_batch` / `update_batch` |
-| `model.py` | `BcModel`：条件编码 + DETRVAE 解码（`z=0`） |
+| `model.py` | `BcModel`：条件编码 + learnable query → ConditionalUnet1D |
 | `loss.py` | `bc_mse_loss`：action chunk 上的 MSE |
-| `optim.py` | AdamW（与 ACT 共用 `helper.optim.build_adamw_optimizer`） |
-| `helper/detr/detr_vae.py` | DETRVAE；BC 路径不建 CVAE encoder |
+| `optim.py` | AdamW |
 
 ## 数据流（训练 / 推理）
 
@@ -53,36 +52,40 @@ flowchart LR
   end
 
   subgraph train["update_batch"]
-    Pred["DETRVAE: â · z=0"]
+    Q["action_query · learnable"]
+    Pred["ConditionalUnet1D: â"]
     GT["action"]
-    MSE["MSE(â, action)"]
+    MSE["MSE(â, action)"]
     Cond --> Pred
+    Q --> Pred
     Pred --> MSE
     GT --> MSE
   end
 
   subgraph infer["infer_batch"]
-    Fwd["DETRVAE: â · z=0"]
+    Q2["action_query · learnable"]
+    Fwd["ConditionalUnet1D: â"]
     Out["action chunk"]
     Cond --> Fwd
+    Q2 --> Fwd
     Fwd --> Out
   end
 ```
 
-- **训练 / 推理**：同一条单次前向；无加噪、无采样循环；`z` 始终为 0。
+- **训练 / 推理**：同一条单次前向；无加噪、无采样循环；timestep 固定为 0。
 - **损失**：仅 `MSE(pred, action)`，无 KL 项。
 
 ## BcModel 内部
 
 ```mermaid
 flowchart TB
-  In["map + state"] --> Enc["encode_cond"]
-  Enc --> Cond["cond_dim = 1024 + 128"]
-  Cond --> DETR["DETRVAE"]
-  Z["z = 0"] --> DETR
-  Q["query_embed · num_queries = pred_horizon"] --> DETR
-  DETR --> Head["Linear + Tanh"]
-  Head --> Out["â (B, H, A)"]
+  In["map + state"] --> Enc["ObsEncoder"]
+  Enc --> Cond["cond_dim"]
+  Q["action_query (1, H, A)"] --> Expand["expand → (B, H, A)"]
+  Expand --> UNet["ConditionalUnet1D"]
+  Cond -->|"global_cond"| UNet
+  T["timestep = 0"] --> UNet
+  UNet --> Out["â (B, H, A)"]
 ```
 
-默认超参见 `BcModelConfig`（与 ACT 对齐，便于隔离 CVAE）：`hidden_dim=256`，`nheads=4`，`enc_layers=2`，`dec_layers=4`，`dim_feedforward=512`。`BcPolicy.lr = 3e-4`。
+默认超参见 `BcModelConfig`（与 DP / FM / ACT 对齐）：`unet_dims=(64,128,256)`，`diffusion_step_embed_dim=64`，`kernel_size=5`，`n_groups=8`。`BcPolicy.lr = 3e-4`。

@@ -195,12 +195,17 @@ class ConditionalUnet1D(nn.Module):
         sample: torch.Tensor,
         timestep: Union[torch.Tensor, float, int],
         global_cond: torch.Tensor | None = None,
+        step_embed: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
             sample: ``(B, T, input_dim)`` noisy action chunk
-            timestep: ``(B,)`` or scalar diffusion step
+            timestep: ``(B,)`` or scalar diffusion step (ignored if
+                ``step_embed`` is set)
             global_cond: ``(B, global_cond_dim)``
+            step_embed: optional ``(B, diffusion_step_embed_dim)`` that
+                replaces ``diffusion_step_encoder(timestep)`` (e.g. ACT
+                projects CVAE ``z`` into the step channel)
 
         Returns:
             ``(B, T, input_dim)`` predicted noise
@@ -208,15 +213,17 @@ class ConditionalUnet1D(nn.Module):
         # (B, T, C) -> (B, C, T)
         sample = sample.moveaxis(-1, -2)
 
-        timesteps = timestep
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor(
-                [timesteps], dtype=torch.long, device=sample.device)
-        elif torch.is_tensor(timesteps) and timesteps.ndim == 0:
-            timesteps = timesteps[None].to(sample.device)
-        timesteps = timesteps.expand(sample.shape[0])
-
-        global_feature = self.diffusion_step_encoder(timesteps)
+        if step_embed is not None:
+            global_feature = step_embed
+        else:
+            timesteps = timestep
+            if not torch.is_tensor(timesteps):
+                timesteps = torch.tensor(
+                    [timesteps], dtype=torch.long, device=sample.device)
+            elif torch.is_tensor(timesteps) and timesteps.ndim == 0:
+                timesteps = timesteps[None].to(sample.device)
+            timesteps = timesteps.expand(sample.shape[0])
+            global_feature = self.diffusion_step_encoder(timesteps)
         if global_cond is not None:
             global_feature = torch.cat([global_feature, global_cond], dim=-1)
 

@@ -15,7 +15,7 @@ from utils.policy.policy import PolicyBase
 
 
 class ActPolicy(PolicyBase):
-    """CVAE action-chunking transformer (ACT)."""
+    """MLP-CVAE ``z→step_embed`` + ConditionalUnet1D action chunker (ACT)."""
 
     lr: float = 2e-4
     kl_weight: float = 5.0

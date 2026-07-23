@@ -15,7 +15,7 @@ from utils.policy.policy import PolicyBase
 
 
 class BcPolicy(PolicyBase):
-    """MSE behavior cloning with DETR action queries (latent z fixed to 0)."""
+    """MSE behavior cloning with ConditionalUnet1D (learnable action query)."""
 
     lr: float = 3e-4
 
