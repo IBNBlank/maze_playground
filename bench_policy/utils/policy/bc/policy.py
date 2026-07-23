@@ -11,6 +11,7 @@ import torch
 from utils.policy.bc.loss import bc_mse_loss
 from utils.policy.bc.model import BcModel
 from utils.policy.bc.optim import build_bc_optimizer
+from utils.policy.helper.ema import EMAModel
 from utils.policy.policy import PolicyBase
 
 
@@ -18,6 +19,7 @@ class BcPolicy(PolicyBase):
     """MSE behavior cloning with ConditionalUnet1D (learnable action query)."""
 
     lr: float = 3e-4
+    ema_decay: float = 0.999
 
     def __init__(
         self,
@@ -36,6 +38,7 @@ class BcPolicy(PolicyBase):
             state_dim=self.state_dim,
             action_dim=self.action_dim,
         ).to(self.device)
+        self.ema = EMAModel(self.model, decay=self.ema_decay)
         self.optimizer: torch.optim.Optimizer = build_bc_optimizer(
             self.model, self.lr)
         self.loss_fn = bc_mse_loss
@@ -43,8 +46,8 @@ class BcPolicy(PolicyBase):
     def infer_batch(self, obs: dict) -> torch.Tensor:
         maps = obs["map"].to(self.device)
         state = obs["state"].to(self.device)
-        self.model.eval()
-        return self.model(maps, state)
+        self.ema.shadow.eval()
+        return self.ema.shadow(maps, state)
 
     def update_batch(self, batch: dict) -> float:
         maps = batch["map"].to(self.device)
@@ -58,4 +61,5 @@ class BcPolicy(PolicyBase):
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self.optimizer.step()
+        self.ema.update(self.model)
         return float(loss.detach().item())

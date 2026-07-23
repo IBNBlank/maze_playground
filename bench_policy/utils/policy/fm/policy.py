@@ -11,13 +11,15 @@ import torch
 from utils.policy.fm.loss import fm_velocity_mse_loss
 from utils.policy.fm.model import FmModel, FmModelConfig
 from utils.policy.fm.optim import build_fm_optimizer
+from utils.policy.helper.ema import EMAModel
 from utils.policy.policy import PolicyBase
 
 
 class FmPolicy(PolicyBase):
     """Conditional flow-matching action-chunking policy."""
 
-    lr: float = 1e-4
+    lr: float = 2e-4
+    ema_decay: float = 0.999
 
     def __init__(
         self,
@@ -38,6 +40,7 @@ class FmPolicy(PolicyBase):
             action_dim=self.action_dim,
             cfg=model_cfg,
         ).to(self.device)
+        self.ema = EMAModel(self.model, decay=self.ema_decay)
         self.optimizer: torch.optim.Optimizer = build_fm_optimizer(
             self.model, self.lr)
         self.loss_fn = fm_velocity_mse_loss
@@ -45,8 +48,8 @@ class FmPolicy(PolicyBase):
     def infer_batch(self, obs: dict) -> torch.Tensor:
         maps = obs["map"].to(self.device)
         state = obs["state"].to(self.device)
-        self.model.eval()
-        return self.model.sample(maps, state)
+        self.ema.shadow.eval()
+        return self.ema.shadow.sample(maps, state)
 
     def update_batch(self, batch: dict) -> float:
         maps = batch["map"].to(self.device)
@@ -66,4 +69,5 @@ class FmPolicy(PolicyBase):
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self.optimizer.step()
+        self.ema.update(self.model)
         return float(loss.detach().item())

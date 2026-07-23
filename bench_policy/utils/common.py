@@ -383,6 +383,9 @@ def save(
     checkpoint = {"policy": _to_cpu_tree(model.state_dict())}
     if optimizer is not None:
         checkpoint["optimizer"] = _to_cpu_tree(optimizer.state_dict())
+    ema = getattr(policy, "ema", None)
+    if ema is not None:
+        checkpoint["ema"] = _to_cpu_tree(ema.state_dict())
     torch.save(checkpoint, ckpt_path)
 
     latest_json = f"{run_dir}/latest.json"
@@ -421,4 +424,11 @@ def load(policy, path: str) -> None:
     optimizer = getattr(policy, "optimizer", None)
     if optimizer is not None and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
+    ema = getattr(policy, "ema", None)
+    if ema is not None:
+        if "ema" in ckpt:
+            ema.load_state_dict(ckpt["ema"])
+        else:
+            # Old ckpts without EMA: seed shadow from training weights.
+            ema.load_state_dict(ckpt["policy"])
     print(f"ckpt loaded from {path}")

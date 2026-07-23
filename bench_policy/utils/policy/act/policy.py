@@ -11,6 +11,7 @@ import torch
 from utils.policy.act.loss import act_loss
 from utils.policy.act.model import ActModel, ActModelConfig
 from utils.policy.act.optim import build_act_optimizer
+from utils.policy.helper.ema import EMAModel
 from utils.policy.policy import PolicyBase
 
 
@@ -19,6 +20,7 @@ class ActPolicy(PolicyBase):
 
     lr: float = 2e-4
     kl_weight: float = 5.0
+    ema_decay: float = 0.999
 
     def __init__(
         self,
@@ -39,6 +41,7 @@ class ActPolicy(PolicyBase):
             action_dim=self.action_dim,
             cfg=model_cfg,
         ).to(self.device)
+        self.ema = EMAModel(self.model, decay=self.ema_decay)
         self.optimizer: torch.optim.Optimizer = build_act_optimizer(
             self.model, self.lr)
         self.loss_fn = act_loss
@@ -46,9 +49,9 @@ class ActPolicy(PolicyBase):
     def infer_batch(self, obs: dict) -> torch.Tensor:
         maps = obs["map"].to(self.device)
         state = obs["state"].to(self.device)
-        self.model.eval()
+        self.ema.shadow.eval()
         with torch.no_grad():
-            a_hat, _ = self.model(maps, state, actions=None)
+            a_hat, _ = self.ema.shadow(maps, state, actions=None)
         return a_hat
 
     def update_batch(self, batch: dict) -> float:
@@ -67,4 +70,5 @@ class ActPolicy(PolicyBase):
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self.optimizer.step()
+        self.ema.update(self.model)
         return float(loss.detach().item())
