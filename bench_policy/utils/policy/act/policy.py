@@ -12,6 +12,7 @@ from utils.policy.act.loss import act_loss
 from utils.policy.act.model import ActModel, ActModelConfig
 from utils.policy.act.optim import build_act_optimizer
 from utils.policy.helper.ema import EMAModel
+from utils.policy.helper.h2d import batch_to_device
 from utils.policy.policy import PolicyBase
 
 
@@ -46,18 +47,23 @@ class ActPolicy(PolicyBase):
             self.model, self.lr)
         self.loss_fn = act_loss
 
+    def _to_device(self, batch: dict, non_blocking: bool = False) -> dict:
+        return batch_to_device(batch, self.device, non_blocking=non_blocking)
+
     def infer_batch(self, obs: dict) -> torch.Tensor:
-        maps = obs["map"].to(self.device)
-        state = obs["state"].to(self.device)
+        obs = self._to_device(obs)
         self.ema.shadow.eval()
         with torch.no_grad():
-            a_hat, _ = self.ema.shadow(maps, state, actions=None)
+            a_hat, _ = self.ema.shadow(obs["map"], obs["state"], actions=None)
         return a_hat
 
     def update_batch(self, batch: dict) -> float:
-        maps = batch["map"].to(self.device)
-        state = batch["state"].to(self.device)
-        action = batch["action"].to(self.device)
+        return self._update_on_device(self._to_device(batch))
+
+    def _update_on_device(self, batch: dict) -> float:
+        maps = batch["map"]
+        state = batch["state"]
+        action = batch["action"]
 
         self.model.train()
         a_hat, (mu, logvar) = self.model(maps, state, actions=action)

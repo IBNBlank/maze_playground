@@ -30,6 +30,7 @@ from utils.common import (
 )
 from utils.data import MazeWindowDataset
 from utils.policy import build_policy
+from utils.policy.helper.h2d import H2dTrainPipeline
 from utils.feishu import send_feishu_train_notification
 
 
@@ -69,6 +70,7 @@ class TrainMazeIL:
         self.dataset = MazeWindowDataset(
             self.dataset_dir,
             use_class=self.args.use_class,
+            prefetch=self.args.prefetch_batches,
         )
         self.eval_episodes = build_eval_episodes(
             self.dataset,
@@ -102,6 +104,8 @@ class TrainMazeIL:
               f"use_class={self.args.use_class}")
         print(f"[train] pred_horizon={self.dataset.pred_horizon} "
               f"state_dim={self.dataset.state_dim}")
+        print(f"[train] prefetch_batches={self.args.prefetch_batches} "
+              f"pin_memory+async_h2d=on")
 
     def _read_latest(self) -> dict | None:
         path = f"runs/{self.run_name}/latest.json"
@@ -143,15 +147,30 @@ class TrainMazeIL:
             leave=False,
             dynamic_ncols=True,
         )
-        while True:
-            batch = self.dataset.get_batch()
-            if batch is None:
-                break
-            loss_val = float(self.policy.update_batch(batch))
+        pipe = H2dTrainPipeline(self.device)
+        compute = self.policy._update_on_device
+        prev_n: int | None = None
+
+        def _consume(loss_val: float, n: int):
+            nonlocal loss_sum, n_steps
             loss_sum += loss_val
             n_steps += 1
             batch_pbar.update(1)
-            batch_pbar.set_postfix(loss=f"{loss_val:.4f}")
+            batch_pbar.set_postfix(loss=f"{loss_val:.4f}", n=n)
+
+        while True:
+            batch = self.dataset.get_batch()
+            if batch is None:
+                loss_val = pipe.flush(compute)
+                if loss_val is not None and prev_n is not None:
+                    _consume(loss_val, prev_n)
+                break
+            n = int(batch["action"].shape[0])
+            loss_val = pipe.push(batch, compute)
+            if loss_val is not None and prev_n is not None:
+                _consume(loss_val, prev_n)
+            prev_n = n
+
         batch_pbar.close()
 
         epoch_loss = loss_sum / n_steps if n_steps > 0 else float("nan")
@@ -236,8 +255,20 @@ class TrainMazeIL:
             metrics=self.metrics,
             run_name=self.run_name,
         )
-        self.writer.close()
+        self.close()
         print(f"Training done. run_name={self.run_name}")
+
+    def close(self):
+        if hasattr(self, "dataset"):
+            try:
+                self.dataset.close()
+            except Exception:
+                pass
+        if hasattr(self, "writer"):
+            try:
+                self.writer.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from utils.policy.bc.loss import bc_mse_loss
 from utils.policy.bc.model import BcModel
 from utils.policy.bc.optim import build_bc_optimizer
 from utils.policy.helper.ema import EMAModel
+from utils.policy.helper.h2d import batch_to_device
 from utils.policy.policy import PolicyBase
 
 
@@ -43,16 +44,21 @@ class BcPolicy(PolicyBase):
             self.model, self.lr)
         self.loss_fn = bc_mse_loss
 
+    def _to_device(self, batch: dict, non_blocking: bool = False) -> dict:
+        return batch_to_device(batch, self.device, non_blocking=non_blocking)
+
     def infer_batch(self, obs: dict) -> torch.Tensor:
-        maps = obs["map"].to(self.device)
-        state = obs["state"].to(self.device)
+        obs = self._to_device(obs)
         self.ema.shadow.eval()
-        return self.ema.shadow(maps, state)
+        return self.ema.shadow(obs["map"], obs["state"])
 
     def update_batch(self, batch: dict) -> float:
-        maps = batch["map"].to(self.device)
-        state = batch["state"].to(self.device)
-        action = batch["action"].to(self.device)
+        return self._update_on_device(self._to_device(batch))
+
+    def _update_on_device(self, batch: dict) -> float:
+        maps = batch["map"]
+        state = batch["state"]
+        action = batch["action"]
 
         self.model.train()
         pred = self.model(maps, state)

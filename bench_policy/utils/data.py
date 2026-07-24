@@ -21,7 +21,9 @@ Training never materializes the full float32 epoch. Shards stay in an LRU
 to float32 only for the batch tensor.
 
 ``prefetch`` > 0 starts a background thread that assembles the next batch while
-the train step runs (overlaps CPU gather with GPU compute).
+the train step runs (overlaps CPU gather with GPU compute). Batches are
+``pin_memory``'d so ``H2dTrainPipeline`` can async-copy the next batch during
+the previous step's compute.
 """
 
 import json
@@ -36,6 +38,13 @@ import torch
 DEFAULT_PREFETCH = 1
 
 
+def _as_torch(array: np.ndarray, pin_memory: bool) -> torch.Tensor:
+    tensor = torch.from_numpy(np.ascontiguousarray(array))
+    if pin_memory:
+        tensor = tensor.pin_memory()
+    return tensor
+
+
 class MazeWindowDataset:
 
     def __init__(
@@ -44,6 +53,7 @@ class MazeWindowDataset:
         cache_shards: int | None = None,
         use_class: bool = False,
         prefetch: int = DEFAULT_PREFETCH,
+        pin_memory: bool = True,
     ):
         self.dataset_dir = Path(dataset_dir).resolve()
         with open(self.dataset_dir / "dataset.json", encoding="utf-8") as f:
@@ -74,6 +84,7 @@ class MazeWindowDataset:
         else:
             self._cache_shards = max(1, int(cache_shards))
         self.prefetch = max(0, int(prefetch))
+        self.pin_memory = bool(pin_memory)
         self._cache: OrderedDict[int, dict] = OrderedDict()
         self._cache_lock = threading.Lock()
 
@@ -168,10 +179,11 @@ class MazeWindowDataset:
             states[positions] = sh["state"][locals_]
             actions[positions] = sh["action"][locals_]
 
+        pin = self.pin_memory
         return {
-            "map": torch.from_numpy(maps.astype(np.float32)),
-            "state": torch.from_numpy(states[:, None, :]),
-            "action": torch.from_numpy(actions),
+            "map": _as_torch(maps.astype(np.float32), pin),
+            "state": _as_torch(states[:, None, :], pin),
+            "action": _as_torch(actions, pin),
         }
 
     def _stop_prefetch(self):
