@@ -19,13 +19,21 @@ action_dim: int = 2: action dimension: [dx, dy] in pixels
 Training never materializes the full float32 epoch. Shards stay in an LRU
 (maps as uint8); each batch gathers rows by global index and casts maps
 to float32 only for the batch tensor.
+
+``prefetch`` > 0 starts a background thread that assembles the next batch while
+the train step runs (overlaps CPU gather with GPU compute).
 """
 
 import json
-import torch
-import numpy as np
+import queue
+import threading
 from collections import OrderedDict
 from pathlib import Path
+
+import numpy as np
+import torch
+
+DEFAULT_PREFETCH = 1
 
 
 class MazeWindowDataset:
@@ -35,6 +43,7 @@ class MazeWindowDataset:
         dataset_dir: Path | str,
         cache_shards: int | None = None,
         use_class: bool = False,
+        prefetch: int = DEFAULT_PREFETCH,
     ):
         self.dataset_dir = Path(dataset_dir).resolve()
         with open(self.dataset_dir / "dataset.json", encoding="utf-8") as f:
@@ -64,13 +73,20 @@ class MazeWindowDataset:
             self._cache_shards = max(1, len(self.shards))
         else:
             self._cache_shards = max(1, int(cache_shards))
+        self.prefetch = max(0, int(prefetch))
         self._cache: OrderedDict[int, dict] = OrderedDict()
+        self._cache_lock = threading.Lock()
 
         # filled by set_epoch — only the index order, not sample arrays
         self._order: np.ndarray | None = None
         self._batch_size = 0
         self._batch_i = 0
         self._num_batches = 0
+
+        self._prefetch_q: queue.Queue | None = None
+        self._prefetch_thread: threading.Thread | None = None
+        self._prefetch_stop = threading.Event()
+        self._prefetch_exc: BaseException | None = None
 
     def __len__(self) -> int:
         return self.num_samples
@@ -84,6 +100,7 @@ class MazeWindowDataset:
 
         Does not load sample arrays; shards are fetched on demand in get_batch.
         """
+        self._stop_prefetch()
         indices = np.load(self.dataset_dir / "idx" /
                           f"epoch_{int(epoch_id):03d}.npy")
         if len(indices) != self.num_samples:
@@ -96,9 +113,27 @@ class MazeWindowDataset:
         self._batch_i = 0
         self._num_batches = ((self.num_samples + self._batch_size - 1) //
                              self._batch_size)
+        self._start_prefetch()
 
     def get_batch(self) -> dict[str, torch.Tensor] | None:
         """Next training batch gathered from cached shards, or None when done."""
+        if self.prefetch <= 0 or self._prefetch_q is None:
+            return self._assemble_batch()
+        if self._prefetch_exc is not None:
+            raise RuntimeError("prefetch failed") from self._prefetch_exc
+        thread = self._prefetch_thread
+        if thread is not None and not thread.is_alive():
+            try:
+                batch = self._prefetch_q.get_nowait()
+            except queue.Empty:
+                return None
+        else:
+            batch = self._prefetch_q.get()
+        if self._prefetch_exc is not None:
+            raise RuntimeError("prefetch failed") from self._prefetch_exc
+        return batch
+
+    def _assemble_batch(self) -> dict[str, torch.Tensor] | None:
         if self._order is None or self._batch_i >= self._num_batches:
             return None
         s = self._batch_i * self._batch_size
@@ -139,6 +174,62 @@ class MazeWindowDataset:
             "action": torch.from_numpy(actions),
         }
 
+    def _stop_prefetch(self):
+        thread = self._prefetch_thread
+        if thread is None:
+            return
+        self._prefetch_stop.set()
+        q = self._prefetch_q
+        while thread.is_alive():
+            if q is not None:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            thread.join(timeout=0.05)
+        self._prefetch_thread = None
+        self._prefetch_q = None
+        self._prefetch_stop.clear()
+        self._prefetch_exc = None
+
+    def _prefetch_loop(self):
+        q = self._prefetch_q
+        assert q is not None
+        try:
+            while not self._prefetch_stop.is_set():
+                batch = self._assemble_batch()
+                if self._prefetch_stop.is_set():
+                    break
+                while not self._prefetch_stop.is_set():
+                    try:
+                        q.put(batch, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+                else:
+                    break
+                if batch is None:
+                    break
+        except BaseException as exc:
+            self._prefetch_exc = exc
+            try:
+                q.put(None, timeout=1.0)
+            except Exception:
+                pass
+
+    def _start_prefetch(self):
+        if self.prefetch <= 0:
+            return
+        self._prefetch_stop.clear()
+        self._prefetch_exc = None
+        self._prefetch_q = queue.Queue(maxsize=self.prefetch)
+        self._prefetch_thread = threading.Thread(
+            target=self._prefetch_loop,
+            name="MazeWindowDataset-prefetch",
+            daemon=True,
+        )
+        self._prefetch_thread.start()
+
     def _load_shard(self, shard_idx: int) -> dict:
         with np.load(self.dataset_dir / self.shards[shard_idx]["path"]) as z:
             rc = np.asarray(z["state"], dtype=np.float32)
@@ -165,15 +256,20 @@ class MazeWindowDataset:
             }
 
     def _ensure_shard(self, shard_idx: int) -> dict:
-        if shard_idx in self._cache:
-            self._cache.move_to_end(shard_idx)
-            return self._cache[shard_idx]
+        with self._cache_lock:
+            if shard_idx in self._cache:
+                self._cache.move_to_end(shard_idx)
+                return self._cache[shard_idx]
         arrays = self._load_shard(shard_idx)
-        self._cache[shard_idx] = arrays
-        self._cache.move_to_end(shard_idx)
-        while len(self._cache) > self._cache_shards:
-            self._cache.popitem(last=False)
-        return arrays
+        with self._cache_lock:
+            if shard_idx in self._cache:
+                self._cache.move_to_end(shard_idx)
+                return self._cache[shard_idx]
+            self._cache[shard_idx] = arrays
+            self._cache.move_to_end(shard_idx)
+            while len(self._cache) > self._cache_shards:
+                self._cache.popitem(last=False)
+            return arrays
 
     def episode_at(self, idx: int) -> dict:
         sid = min(int(idx) // self.shard_size, len(self.shards) - 1)
@@ -188,3 +284,8 @@ class MazeWindowDataset:
         if self.use_class:
             ep["class"] = float(c["state"][local, -1])
         return ep
+
+    def close(self):
+        self._stop_prefetch()
+        with self._cache_lock:
+            self._cache.clear()
