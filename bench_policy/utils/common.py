@@ -16,9 +16,21 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from torch.utils.tensorboard import SummaryWriter
 
+# Absolute root for ckpts / logs. Override with MAZE_RUNS_ROOT.
+RUNS_ROOT = os.environ.get(
+    "MAZE_RUNS_ROOT",
+    "/mnt/data/maze_playground/runs",
+)
+
+
 #--------------------------------#
 # init
 #--------------------------------#
+
+
+def run_path(*parts: str) -> str:
+    """Join ``parts`` under ``RUNS_ROOT`` (absolute)."""
+    return os.path.join(RUNS_ROOT, *parts)
 
 
 def make_run_name(
@@ -27,7 +39,7 @@ def make_run_name(
     algo: str,
     use_class: bool = False,
 ) -> str:
-    """Canonical run dir name under ``runs/``."""
+    """Canonical run dir name under ``RUNS_ROOT``."""
     name = f"seed{seed}_{dataset_name}_{algo}"
     return f"priv_{name}" if use_class else name
 
@@ -52,12 +64,12 @@ def tensorboard_init(
     mode: str = "train",
     hparams: Optional[dict] = None,
 ):
-    """Create a TensorBoard writer under ``runs/{run_name}/``."""
+    """Create a TensorBoard writer under ``RUNS_ROOT/{run_name}/``."""
     mode = mode.lower()
     if mode not in ("train", "eval"):
         raise ValueError(f"mode must be 'train' or 'eval', got {mode!r}")
-    log_dir = (f"runs/{run_name}"
-               if mode == "train" else f"runs/{run_name}/eval")
+    log_dir = (run_path(run_name)
+               if mode == "train" else run_path(run_name, "eval"))
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
     if hparams:
@@ -408,11 +420,11 @@ def save(
     if model is None:
         raise RuntimeError("policy.model is required for save()")
 
-    run_dir = f"runs/{run_name}"
+    run_dir = run_path(run_name)
     os.makedirs(run_dir, exist_ok=True)
     ckpt_name = ("final_ckpt.pt"
                  if int(iteration) < 0 else f"ckpt_{int(iteration)}.pt")
-    ckpt_path = f"{run_dir}/{ckpt_name}"
+    ckpt_path = os.path.join(run_dir, ckpt_name)
 
     checkpoint = {"policy": _to_cpu_tree(model.state_dict())}
     if optimizer is not None:
@@ -422,7 +434,7 @@ def save(
         checkpoint["ema"] = _to_cpu_tree(ema.state_dict())
     torch.save(checkpoint, ckpt_path)
 
-    latest_json = f"{run_dir}/latest.json"
+    latest_json = os.path.join(run_dir, "latest.json")
     with open(latest_json, "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -435,8 +447,8 @@ def save(
         )
 
     if is_best:
-        shutil.copy(ckpt_path, f"{run_dir}/best_success_ckpt.pt")
-        shutil.copy(latest_json, f"{run_dir}/best_success.json")
+        shutil.copy(ckpt_path, os.path.join(run_dir, "best_success_ckpt.pt"))
+        shutil.copy(latest_json, os.path.join(run_dir, "best_success.json"))
 
     if int(iteration) >= 0:
         _prune_regular_ckpts(run_dir, keep=keep_ckpts)

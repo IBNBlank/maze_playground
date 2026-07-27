@@ -7,7 +7,7 @@
 ################################################################
 """Collect eval results and push a Feishu sweep summary.
 
-Reads ``runs/[priv_]seed{seed}_{dataset}_{algo}/eval/eval_result.json``.
+Reads ``RUNS_ROOT/[priv_]seed{seed}_{dataset}_{algo}/eval/eval_result.json``.
 """
 
 import os, sys, tyro
@@ -18,6 +18,7 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_DIR)
 
+from utils.common import RUNS_ROOT
 from utils.feishu import (
     collect_eval_results,
     format_eval_sweep_markdown,
@@ -33,8 +34,9 @@ class NotifyEvalArgs:
     """policy algorithms used in the sweep"""
     datasets: list[str]
     """dataset names under ../datasets/"""
-    runs_dir: str = "runs"
-    """directory containing [priv_]seed{seed}_{dataset}_{algo}/eval/"""
+    runs_dir: str = ""
+    """directory containing [priv_]seed{seed}_{dataset}_{algo}/eval/;
+    empty = RUNS_ROOT (MAZE_RUNS_ROOT)"""
 
 
 def main():
@@ -43,7 +45,7 @@ def main():
         print("[notify_eval] no seeds/algos/datasets; nothing to summarize.")
         sys.exit(0)
 
-    runs_dir = Path(args.runs_dir)
+    runs_dir = Path(args.runs_dir) if args.runs_dir else Path(RUNS_ROOT)
     if not runs_dir.is_absolute():
         runs_dir = Path(os.path.dirname(os.path.abspath(__file__))) / runs_dir
 

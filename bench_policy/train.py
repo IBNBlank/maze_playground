@@ -25,6 +25,7 @@ from utils.common import (
     save,
     device_init,
     make_run_name,
+    run_path,
     tensorboard_init,
     log_eval_summary,
 )
@@ -54,7 +55,7 @@ class TrainMazeIL:
                   "already finished.")
             return
 
-        os.makedirs(f"runs/{self.run_name}", exist_ok=True)
+        os.makedirs(run_path(self.run_name), exist_ok=True)
         self.device = device_init(
             self.args.seed,
             torch_deterministic=self.args.torch_deterministic,
@@ -108,7 +109,7 @@ class TrainMazeIL:
               f"pin_memory+async_h2d=on")
 
     def _read_latest(self) -> dict | None:
-        path = f"runs/{self.run_name}/latest.json"
+        path = run_path(self.run_name, "latest.json")
         if not os.path.isfile(path):
             return None
         with open(path, "r", encoding="utf-8") as f:
@@ -119,7 +120,7 @@ class TrainMazeIL:
             return
         self.start_epoch = int(record.get("iteration", 0))
         self.metrics = Metrics.from_dict(record.get("metrics"))
-        load(self.policy, f"runs/{self.run_name}/{record.get('ckpt_name')}")
+        load(self.policy, run_path(self.run_name, record.get("ckpt_name")))
         print(f"[train] resume from epoch index {self.start_epoch}")
 
     def _epoch_postfix(self, epoch_loss: float, epoch_id: int) -> dict:

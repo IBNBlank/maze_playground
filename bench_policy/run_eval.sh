@@ -3,8 +3,8 @@
 # Batch evaluation wrapper for eval.py + notify_eval.py.
 #
 # Nested schedule order: seed -> dataset -> algo -> use_class. Evaluates each
-# trained policy under runs/[priv_]seed{seed}_{dataset_name}_{algo}/; writes
-# results to runs/.../eval/. After the sweep, sends one Feishu summary card.
+# trained policy under $MAZE_RUNS_ROOT/[priv_]seed{seed}_{dataset_name}_{algo}/;
+# writes results to .../eval/. After the sweep, sends one Feishu summary card.
 #
 # Usage:
 #   ./run_eval.sh
@@ -20,6 +20,8 @@
 #   NUM_EVAL_EPISODES      : episodes per job; 0 = full epoch / all samples
 #                            (default: 0)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
+#   MAZE_RUNS_ROOT         : ckpt/log root
+#                            (default: /mnt/data/maze_playground/runs)
 #   EXTRA_ARGS             : extra CLI args forwarded to eval.py
 ###############################################################################
 set -u
@@ -40,6 +42,7 @@ MAZE_SEEDS="${MAZE_SEEDS:-14 28 42}"
 MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-best_success_ckpt.pt}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-0}"
 GOAL_TOL="${GOAL_TOL:-2.0}"
+export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/maze_playground/runs}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 USE_CLASS_VALUES=(0 1)
 
@@ -59,6 +62,7 @@ else
 	echo "[run_eval] ckpt=${MAZE_CKPT_NAME} episodes=${NUM_EVAL_EPISODES}" \
 		"use_class=${USE_CLASS_VALUES[*]}"
 fi
+echo "[run_eval] runs_root=${MAZE_RUNS_ROOT}"
 echo "[run_eval] loop order: seed -> dataset -> algo -> use_class"
 
 for seed in ${MAZE_SEEDS}; do
@@ -73,7 +77,7 @@ for seed in ${MAZE_SEEDS}; do
 				run_name="$("${PYTHON}" -c \
 					"from utils.common import make_run_name; \
 print(make_run_name(${seed}, '${dataset}', '${algo}', use_class=bool(${use_class})))")"
-				ckpt="runs/${run_name}/${MAZE_CKPT_NAME}"
+				ckpt="${MAZE_RUNS_ROOT}/${run_name}/${MAZE_CKPT_NAME}"
 				echo "######################################################################"
 				echo "[run_eval] === seed=${seed} dataset=${dataset}" \
 					"algo=${algo} use_class=${use_class} ==="

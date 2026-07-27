@@ -21,6 +21,8 @@
 #   NUM_EVAL_EPISODES      : mid-train eval episodes; 0 = full epoch
 #                            (default: 500)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
+#   MAZE_RUNS_ROOT         : ckpt/log root
+#                            (default: /mnt/data/maze_playground/runs)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
 ###############################################################################
@@ -43,6 +45,7 @@ EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-500}"
 GOAL_TOL="${GOAL_TOL:-2.0}"
+export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/maze_playground/runs}"
 MAX_CONSECUTIVE_FAILS="${MAX_CONSECUTIVE_FAILS:-5}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 USE_CLASS_VALUES=(0 1)
@@ -58,6 +61,7 @@ fi
 
 echo "[run_train] datasets=${#DATASETS[@]} algos=${MAZE_ALGOS[*]} seeds=${MAZE_SEEDS}"
 echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ} use_class=${USE_CLASS_VALUES[*]}"
+echo "[run_train] runs_root=${MAZE_RUNS_ROOT}"
 echo "[run_train] loop order: seed -> dataset -> algo -> use_class"
 
 for seed in ${MAZE_SEEDS}; do

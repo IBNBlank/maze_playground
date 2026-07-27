@@ -14,4 +14,10 @@ import torch.optim as optim
 
 
 def build_bc_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
-    return optim.AdamW(model.parameters(), lr=lr)
+    return optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(0.95, 0.999),
+        weight_decay=1e-6,
+        eps=1e-7,
+    )

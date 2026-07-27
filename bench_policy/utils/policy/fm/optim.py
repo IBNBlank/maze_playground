@@ -14,10 +14,10 @@ import torch.optim as optim
 
 
 def build_fm_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
-    """AdamW aligned with Diffusion Policy defaults for fair comparison."""
     return optim.AdamW(
         model.parameters(),
         lr=lr,
         betas=(0.95, 0.999),
         weight_decay=1e-6,
+        eps=1e-7,
     )

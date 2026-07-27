@@ -20,6 +20,7 @@ class FmPolicy(PolicyBase):
     """Conditional flow-matching action-chunking policy."""
 
     lr: float = 2e-4
+    max_grad_norm: float = 10.0
     ema_decay: float = 0.995
 
     def __init__(
@@ -74,6 +75,9 @@ class FmPolicy(PolicyBase):
 
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if self.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), self.max_grad_norm)
         self.optimizer.step()
         self.ema.update(self.model)
         return float(loss.detach().item())

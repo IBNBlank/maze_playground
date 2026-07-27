@@ -53,8 +53,8 @@ class TrainArgs(_SharedArgs):
 class EvalArgs(_SharedArgs):
     # path
     ckpt_name: str = "best_success_ckpt.pt"
-    """checkpoint filename under runs/{run_name}/"""
+    """checkpoint filename under RUNS_ROOT/{run_name}/"""
 
     # eval
     capture_preview: bool = True
-    """save a small collage of rollout overlays under runs/{run_name}/eval/"""
+    """save a small collage of rollout overlays under RUNS_ROOT/{run_name}/eval/"""

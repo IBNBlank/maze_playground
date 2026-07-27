@@ -22,6 +22,7 @@ from utils.common import (
     device_init,
     log_eval_summary,
     make_run_name,
+    run_path,
 )
 from utils.data import MazeWindowDataset
 from utils.policy import build_policy
@@ -63,7 +64,7 @@ class EvalMazeIL:
             action_dim=self.dataset.action_dim,
             device=self.device,
         )
-        load(self.policy, f"runs/{self.run_name}/{self.args.ckpt_name}")
+        load(self.policy, run_path(self.run_name, self.args.ckpt_name))
 
     def run(self) -> dict:
         print(f"Starting evaluation on {self.args.dataset_name} "
@@ -76,7 +77,7 @@ class EvalMazeIL:
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
             robot_radius=self.dataset.robot_radius,
-            preview_path=(f"runs/{self.run_name}/eval/eval_preview.png"
+            preview_path=(run_path(self.run_name, "eval", "eval_preview.png")
                           if self.args.capture_preview else None),
         )
         eval_time = time.perf_counter() - stime
@@ -96,9 +97,9 @@ class EvalMazeIL:
             **summary,
         }
 
-        eval_dir = f"runs/{self.run_name}/eval"
+        eval_dir = run_path(self.run_name, "eval")
         os.makedirs(eval_dir, exist_ok=True)
-        result_path = f"{eval_dir}/eval_result.json"
+        result_path = os.path.join(eval_dir, "eval_result.json")
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         print(f"[eval] result saved to {result_path}")
