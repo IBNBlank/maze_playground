@@ -407,7 +407,7 @@ def save(
     metrics: Metrics,
     iteration: int,
     is_best: bool = False,
-    keep_ckpts: int = 5,
+    keep_ckpts: int = 2,
 ) -> str:
     """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best.
 
