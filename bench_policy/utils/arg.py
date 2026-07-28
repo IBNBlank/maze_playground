@@ -26,6 +26,8 @@ class _SharedArgs:
     """subdir under ../datasets/"""
     use_class: bool = False
     """if True, append class to state (state_dim 4 -> 5); run_name = priv_*"""
+    batch_size: int = 512
+    """samples / episodes per batch (train and eval infer)"""
 
     # eval knobs shared by train mid-eval and eval.py
     num_eval: int = 100
@@ -39,8 +41,6 @@ class TrainArgs(_SharedArgs):
     # train
     epochs: int = 100
     """number of training epochs (= number of idx/epoch_*.npy perms to use)"""
-    batch_size: int = 512
-    """samples per training batch (last batch of an epoch may be shorter)"""
     prefetch_batches: int = 1
     """assemble this many batches ahead on a background thread (0=off)"""
 

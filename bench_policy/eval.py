@@ -77,6 +77,7 @@ class EvalMazeIL:
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
             robot_radius=self.dataset.robot_radius,
+            batch_size=self.args.batch_size,
             preview_path=(run_path(self.run_name, "eval", "eval_preview.png")
                           if self.args.capture_preview else None),
         )

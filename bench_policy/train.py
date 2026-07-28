@@ -189,6 +189,7 @@ class TrainMazeIL:
             goal_tol=self.args.goal_tol,
             max_abs_delta=self.dataset.max_abs_delta,
             robot_radius=self.dataset.robot_radius,
+            batch_size=self.args.batch_size,
         )
 
         success = float(summary["success_rate"])

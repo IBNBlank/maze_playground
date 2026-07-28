@@ -219,6 +219,51 @@ def save_eval_preview(
     tqdm.tqdm.write(f"[eval] preview saved to {path}")
 
 
+def _rollout_open_loop(
+    cur: np.ndarray,
+    goal: np.ndarray,
+    chunk: np.ndarray,
+    collision_map: np.ndarray,
+    size: int,
+    goal_tol: float,
+    max_abs_delta: float,
+    record_path: bool,
+) -> tuple[bool, bool, int, Optional[list[np.ndarray]]]:
+    """Step one open-loop action chunk; optionally keep path points."""
+    path = [cur.copy()] if record_path else None
+    steps = 0
+    collided = False
+    reached = False
+    for ai, a in enumerate(chunk):
+        cur = np.clip(
+            cur + np.clip(a.astype(np.float64), -1.0, 1.0) * max_abs_delta,
+            0.0,
+            size - 1,
+        )
+        steps += 1
+        if path is not None:
+            path.append(cur.copy())
+        c, r = int(np.rint(cur[0])), int(np.rint(cur[1]))
+        if collision_map[r, c]:
+            collided = True
+            # finish drawing the rest of this chunk into / through walls
+            if path is not None:
+                for a2 in chunk[ai + 1:]:
+                    cur = np.clip(
+                        cur +
+                        np.clip(a2.astype(np.float64), -1.0, 1.0) *
+                        max_abs_delta,
+                        0.0,
+                        size - 1,
+                    )
+                    path.append(cur.copy())
+            break
+        if float(np.linalg.norm(cur - goal)) < goal_tol:
+            reached = True
+            break
+    return collided, reached, steps, path
+
+
 def evaluate(
     policy,
     episodes: Sequence[dict],
@@ -226,10 +271,11 @@ def evaluate(
     goal_tol: float = 1.0,
     max_abs_delta: float = 5.0,
     robot_radius: int = 5,
+    batch_size: int = 512,
     preview_path: Optional[str] = None,
     preview_count: int = 16,
 ) -> dict:
-    """Open-loop eval: one action-chunk inference from start, then step.
+    """Open-loop eval: batched action-chunk inference from start, then step.
 
     Collision uses occupancy dilated by ``max(0, robot_radius - 1)`` (relaxed
     vs data_gen ``planning_map`` which uses full ``robot_radius``).
@@ -238,6 +284,7 @@ def evaluate(
     ``preview_count`` rollout overlays.
     """
     horizon = int(policy.pred_horizon)
+    bs = max(1, int(batch_size))
     want_preview = preview_path is not None and int(preview_count) > 0
     results: list[tuple[bool, bool, int]] = []
     preview_tiles: list[np.ndarray] = []
@@ -245,36 +292,47 @@ def evaluate(
     collision_radius = max(0, int(robot_radius) - 1)
     n_coll = 0
     n_succ = 0
+    n_eps = len(episodes)
 
     pbar = tqdm.tqdm(
-        episodes,
+        total=n_eps,
         desc="eval",
         leave=False,
         dynamic_ncols=True,
     )
-    for ep in pbar:
-        # Dataset ``map`` is raw occupancy; inflate for robot footprint.
-        occupancy = np.asarray(ep["planning_map"])
-        collision_map = inflate_occupancy(occupancy, collision_radius)
-        size = int(occupancy.shape[0])
-        scale = float(size - 1)
-        cur = np.array(
-            [float(ep["start_rc"][1]),
-             float(ep["start_rc"][0])],
-            dtype=np.float64,
-        )
-        goal = np.array(
-            [float(ep["goal_rc"][1]),
-             float(ep["goal_rc"][0])],
-            dtype=np.float64,
-        )
-        record = want_preview and len(preview_tiles) < int(preview_count)
-        path = [cur.copy()] if record else None
+    for start in range(0, n_eps, bs):
+        batch_eps = episodes[start:start + bs]
+        occupancies: list[np.ndarray] = []
+        collision_maps: list[np.ndarray] = []
+        curs: list[np.ndarray] = []
+        goals: list[np.ndarray] = []
+        sizes: list[int] = []
+        need_infer: list[int] = []
+        map_rows: list[np.ndarray] = []
+        state_rows: list[np.ndarray] = []
 
-        steps = 0
-        collided = False
-        reached = float(np.linalg.norm(cur - goal)) < goal_tol
-        if not reached:
+        for i, ep in enumerate(batch_eps):
+            occupancy = np.asarray(ep["planning_map"])
+            collision_map = inflate_occupancy(occupancy, collision_radius)
+            size = int(occupancy.shape[0])
+            scale = float(size - 1)
+            cur = np.array(
+                [float(ep["start_rc"][1]),
+                 float(ep["start_rc"][0])],
+                dtype=np.float64,
+            )
+            goal = np.array(
+                [float(ep["goal_rc"][1]),
+                 float(ep["goal_rc"][0])],
+                dtype=np.float64,
+            )
+            occupancies.append(occupancy)
+            collision_maps.append(collision_map)
+            curs.append(cur)
+            goals.append(goal)
+            sizes.append(size)
+            if float(np.linalg.norm(cur - goal)) < goal_tol:
+                continue
             state_list = [
                 cur[0] / scale,
                 cur[1] / scale,
@@ -284,64 +342,62 @@ def evaluate(
             # Privileged class: append as one extra state dim (4 -> 5).
             if "class" in ep:
                 state_list.append(float(ep["class"]))
-            state = np.asarray([state_list], dtype=np.float32)
+            need_infer.append(i)
+            map_rows.append(occupancy.astype(np.float32))
+            state_rows.append(
+                np.asarray([state_list], dtype=np.float32))  # (1, D)
+
+        chunks: dict[int, np.ndarray] = {}
+        if need_infer:
             with torch.no_grad():
-                chunk = policy.infer_batch({
+                pred = policy.infer_batch({
                     "map":
-                    torch.from_numpy(occupancy.astype(
-                        np.float32)[None]).to(device),
+                    torch.from_numpy(np.stack(map_rows, axis=0)).to(device),
                     "state":
-                    torch.from_numpy(state[None]).to(device),
-                })[0].detach().cpu().numpy()[:horizon]
+                    torch.from_numpy(np.stack(state_rows, axis=0)).to(device),
+                }).detach().cpu().numpy()[:, :horizon]
+            for j, idx in enumerate(need_infer):
+                chunks[idx] = pred[j]
 
-            for ai, a in enumerate(chunk):
-                cur = np.clip(
-                    cur +
-                    np.clip(a.astype(np.float64), -1.0, 1.0) * max_abs_delta,
-                    0.0,
-                    size - 1,
+        for i, ep in enumerate(batch_eps):
+            record = want_preview and len(preview_tiles) < int(preview_count)
+            if i not in chunks:
+                collided, reached, steps, path = (
+                    False, True, 0, [curs[i].copy()] if record else None)
+            else:
+                collided, reached, steps, path = _rollout_open_loop(
+                    curs[i],
+                    goals[i],
+                    chunks[i],
+                    collision_maps[i],
+                    sizes[i],
+                    goal_tol,
+                    max_abs_delta,
+                    record,
                 )
-                steps += 1
-                if path is not None:
-                    path.append(cur.copy())
-                c, r = int(np.rint(cur[0])), int(np.rint(cur[1]))
-                if collision_map[r, c]:
-                    collided = True
-                    # finish drawing the rest of this chunk into / through walls
-                    if path is not None:
-                        for a2 in chunk[ai + 1:]:
-                            cur = np.clip(
-                                cur +
-                                np.clip(a2.astype(np.float64), -1.0, 1.0) *
-                                max_abs_delta,
-                                0.0,
-                                size - 1,
-                            )
-                            path.append(cur.copy())
-                    break
-                if float(np.linalg.norm(cur - goal)) < goal_tol:
-                    reached = True
-                    break
 
-        results.append((collided, reached, steps))
-        n_coll += int(collided)
-        n_succ += int(reached)
-        if path is not None:
-            preview_tiles.append(
-                _render_rollout_tile(
-                    occupancy,
-                    np.asarray(path, dtype=np.float32),
-                    ep["start_rc"],
-                    ep["goal_rc"],
-                    collided=collided,
-                    reached=reached,
-                ))
-        n = len(results)
-        pbar.set_postfix(
-            coll=f"{n_coll / n:.0%}",
-            succ=f"{n_succ / n:.0%}",
-            refresh=False,
-        )
+            results.append((collided, reached, steps))
+            n_coll += int(collided)
+            n_succ += int(reached)
+            if path is not None:
+                preview_tiles.append(
+                    _render_rollout_tile(
+                        occupancies[i],
+                        np.asarray(path, dtype=np.float32),
+                        ep["start_rc"],
+                        ep["goal_rc"],
+                        collided=collided,
+                        reached=reached,
+                    ))
+            n = len(results)
+            pbar.update(1)
+            pbar.set_postfix(
+                coll=f"{n_coll / n:.0%}",
+                succ=f"{n_succ / n:.0%}",
+                refresh=False,
+            )
+
+    pbar.close()
 
     if want_preview:
         save_eval_preview(preview_tiles, preview_path)
