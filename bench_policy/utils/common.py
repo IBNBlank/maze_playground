@@ -408,12 +408,13 @@ def save(
     iteration: int,
     is_best: bool = False,
     keep_ckpts: int = 2,
+    total_iters: int | None = None,
 ) -> str:
     """Write ``ckpt_*.pt`` + ``latest.json``; if ``is_best``, also snapshot best.
 
-    Regular numbered checkpoints are pruned to the newest ``keep_ckpts``
-    (clamped to >= 1). ``final_ckpt.pt`` / ``best_success_ckpt.pt`` are always
-    retained.
+    ``iteration=-1`` writes ``final_ckpt.pt`` (last iter). Regular numbered
+    checkpoints are pruned to the newest ``keep_ckpts`` (clamped to >= 1).
+    ``final_ckpt.pt`` / ``best_success_ckpt.pt`` are always retained.
     """
     model = getattr(policy, "model", None)
     optimizer = getattr(policy, "optimizer", None)
@@ -434,17 +435,16 @@ def save(
         checkpoint["ema"] = _to_cpu_tree(ema.state_dict())
     torch.save(checkpoint, ckpt_path)
 
+    meta = {
+        "ckpt_name": ckpt_name,
+        "iteration": int(iteration),
+        "metrics": asdict(metrics),
+    }
+    if total_iters is not None:
+        meta["total_iters"] = int(total_iters)
     latest_json = os.path.join(run_dir, "latest.json")
     with open(latest_json, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "ckpt_name": ckpt_name,
-                "iteration": int(iteration),
-                "metrics": asdict(metrics),
-            },
-            f,
-            indent=2,
-        )
+        json.dump(meta, f, indent=2)
 
     if is_best:
         shutil.copy(ckpt_path, os.path.join(run_dir, "best_success_ckpt.pt"))

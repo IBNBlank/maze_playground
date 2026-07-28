@@ -216,6 +216,7 @@ class TrainMazeIL:
             metrics=self.metrics,
             iteration=-1 if is_final else epoch_1based,
             is_best=is_best,
+            total_iters=self.args.epochs,
         )
 
     def run(self):

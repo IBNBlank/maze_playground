@@ -208,6 +208,15 @@ def collect_eval_results(
                         continue
                     try:
                         data = json.loads(path.read_text(encoding="utf-8"))
+                        ckpt = str(
+                            data.get("ckpt_name", "best_success_ckpt.pt"))
+                        meta_name = ("best_success.json" if "best_success"
+                                     in ckpt else "latest.json")
+                        meta: dict = {}
+                        meta_path = root / run / meta_name
+                        if meta_path.is_file():
+                            meta = json.loads(
+                                meta_path.read_text(encoding="utf-8"))
                         results.append({
                             "run_name": run,
                             "algo": str(data.get("algo", algo)),
@@ -222,6 +231,8 @@ def collect_eval_results(
                             "success_average_steps": data.get(
                                 "success_average_steps"),
                             "num_episodes": data.get("num_episodes"),
+                            "iteration": meta.get("iteration"),
+                            "total_iters": meta.get("total_iters"),
                         })
                     except (OSError, json.JSONDecodeError, KeyError, TypeError,
                             ValueError):
@@ -229,14 +240,33 @@ def collect_eval_results(
     return results
 
 
-def _fmt_rate(rate: Optional[float]) -> str:
+def _fmt_rate(
+    rate: Optional[float],
+    iteration: Optional[int] = None,
+    total_iters: Optional[int] = None,
+) -> str:
     if rate is None:
         return "-"
-    return f"{rate * 100:.1f}%"
+    text = f"{rate * 100:.1f}%"
+    if iteration is None:
+        return text
+    it = int(iteration)
+    if it < 0:  # -1 = last iter
+        it = int(total_iters) if total_iters is not None else it
+    if total_iters is not None:
+        return f"{text}@{it}/{int(total_iters)}"
+    return f"{text}@{it}"
 
 
-def _option_cell(rate: Optional[float]) -> list[dict]:
-    return [{"text": _fmt_rate(rate), "color": _rate_color(rate)}]
+def _option_cell(
+    rate: Optional[float],
+    iteration: Optional[int] = None,
+    total_iters: Optional[int] = None,
+) -> list[dict]:
+    return [{
+        "text": _fmt_rate(rate, iteration, total_iters),
+        "color": _rate_color(rate),
+    }]
 
 
 def _mean(rates) -> Optional[float]:
@@ -302,6 +332,24 @@ def _cell_rate(index, algo, dataset, use_class, seeds) -> Optional[float]:
         _success_rate(index, algo, dataset, s, use_class) for s in seeds)
 
 
+def _cell_fmt(index, algo, dataset, use_class, seeds) -> tuple[
+        Optional[float], Optional[int], Optional[int]]:
+    rate = _cell_rate(index, algo, dataset, use_class, seeds)
+    seed_list = list(seeds)
+    if len(seed_list) != 1:
+        return rate, None, None
+    row = index.get(
+        (str(seed_list[0]), str(dataset), str(algo), bool(use_class)))
+    if row is None:
+        return rate, None, None
+    it, tot = row.get("iteration"), row.get("total_iters")
+    return (
+        rate,
+        int(it) if it is not None else None,
+        int(tot) if tot is not None else None,
+    )
+
+
 def _algo_dataset_table(index, algos, datasets, seeds):
     """Rows=algo (bc/priv_bc/...), cols=dataset; values mean over ``seeds``."""
     specs = _row_specs(algos)
@@ -313,8 +361,8 @@ def _algo_dataset_table(index, algos, datasets, seeds):
     for _, label, algo, use_class in specs:
         row: dict[str, Any] = {"algo": label}
         for ds in datasets:
-            rate = _cell_rate(index, algo, ds, use_class, seeds)
-            row[f"ds_{ds}"] = _option_cell(rate)
+            rate, it, tot = _cell_fmt(index, algo, ds, use_class, seeds)
+            row[f"ds_{ds}"] = _option_cell(rate, it, tot)
         rows.append(row)
     return _feishu_table(columns, rows)
 
@@ -324,7 +372,7 @@ def _algo_dataset_text(index, algos, datasets, seeds):
     lines = ["algo \\ dataset | " + " | ".join(str(d) for d in datasets)]
     for _, label, algo, use_class in specs:
         cells = [
-            _fmt_rate(_cell_rate(index, algo, ds, use_class, seeds))
+            _fmt_rate(*_cell_fmt(index, algo, ds, use_class, seeds))
             for ds in datasets
         ]
         lines.append(f"{label} | " + " | ".join(cells))
