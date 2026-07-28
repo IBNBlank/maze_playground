@@ -15,9 +15,9 @@ Each expert route becomes one sample:
   class        : () int16 route-cond id (0 = topmost L→R corridor)
 
 One or more demons/{id} trees may be merged into a single named dataset.
-Shards of SHARD_SIZE samples are written under
+Shards of ``shard_size`` samples are written under
   {out_dir}/dataset/data_XXXXXX.npz
-plus dataset.json and NUM_IDX_PERMS shuffled full-index permutations as
+plus dataset.json and ``num_idx_perms`` shuffled full-index permutations as
   {out_dir}/idx/epoch_XXX.npy
 so training can pick epochs by seed without DataLoader shuffle state.
 Each epoch file is a full-index permutation; training streams batches by
@@ -35,10 +35,6 @@ import tyro
 from tqdm import tqdm
 
 from utils.arg import SetArgs
-
-SHARD_SIZE = 2048
-NUM_IDX_PERMS = 300
-IDX_PERM_SEED = 0
 
 
 def _resolve_out_dir(args: SetArgs) -> Path:
@@ -104,8 +100,8 @@ def _clear_buf(buf: Dict[str, List[np.ndarray]]) -> None:
 def _write_idx_perms(
     idx_dir: Path,
     num_samples: int,
-    num_perms: int = NUM_IDX_PERMS,
-    seed: int = IDX_PERM_SEED,
+    num_perms: int,
+    seed: int,
 ) -> List[str]:
     """Write num_perms shuffled full permutations of [0, num_samples)."""
     if num_samples <= 0:
@@ -132,7 +128,6 @@ def _iter_route_samples(
     demons_id: str,
 ):
     """Yield map/state/action_chunk/class for every route in every map."""
-    map_id = 0
     for shard_name in shard_names:
         shard_path = demons_dir / shard_name
         if not shard_path.is_file():
@@ -173,12 +168,8 @@ def _iter_route_samples(
                         "action_chunk": np.asarray(actions[i, r],
                                                    dtype=np.float32),
                         "class": np.asarray(cls, dtype=np.int16),
-                        "map_id": map_id,
                         "route_id": r,
-                        "demons_id": demons_id,
-                        "routes_per_map": num_routes,
                     }
-                map_id += 1
 
 
 def gen_dataset(args: SetArgs) -> dict:

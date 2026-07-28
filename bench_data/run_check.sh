@@ -16,7 +16,7 @@
 # Tunables (env vars):
 #   PYTHON           : python interpreter (default: active venv, else repo .venv)
 #   SIZE             : map side length used in dataset name (default: 256)
-#   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
+#   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4)
 #   DATASET_DIR      : dataset base dir (default: ../demons/genplan${SIZE});
 #                      each run uses ${DATASET_DIR}_r${num_routes}
 #   PREVIEW_COUNT    : number of leading maps to visualize (default: 16)

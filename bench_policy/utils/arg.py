@@ -22,7 +22,7 @@ class _SharedArgs:
     # algo / data
     algo: str = "bc"
     """policy algorithm: bc | act | dp | fm"""
-    dataset_name: str = "genplan256_mix"
+    dataset_name: str = "genplan256_r2"
     """subdir under ../datasets/"""
     use_class: bool = False
     """if True, append class to state (state_dim 4 -> 5); run_name = priv_*"""
@@ -32,7 +32,7 @@ class _SharedArgs:
     # eval knobs shared by train mid-eval and eval.py
     num_eval: int = 100
     """episodes to evaluate; 0 = all samples (one full epoch)"""
-    goal_tol: float = 1.0
+    goal_tol: float = 2.0
     """pixel L2 distance threshold for success (error < goal_tol)"""
 
 

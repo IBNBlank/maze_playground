@@ -21,7 +21,7 @@
 #                            (default: 0)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
 #   MAZE_RUNS_ROOT         : ckpt/log root
-#                            (default: /mnt/data/maze_playground/runs)
+#                            (default: /mnt/data/runs/maze_playground)
 #   EXTRA_ARGS             : extra CLI args forwarded to eval.py
 ###############################################################################
 set -u
@@ -42,7 +42,7 @@ MAZE_SEEDS="${MAZE_SEEDS:-14 28 42}"
 MAZE_CKPT_NAME="${MAZE_CKPT_NAME:-best_success_ckpt.pt}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-0}"
 GOAL_TOL="${GOAL_TOL:-2.0}"
-export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/maze_playground/runs}"
+export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/runs/maze_playground}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 USE_CLASS_VALUES=(0 1)
 

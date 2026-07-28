@@ -15,14 +15,14 @@
 #
 # Tunables (env vars):
 #   PYTHON           : python interpreter (default: active venv, else repo .venv)
-#   NUM_MAPS         : number of maps (default: 1000)
+#   NUM_MAPS         : number of maps (default: 5000)
 #   SIZE             : map side length (default: 256)
-#   NUM_ROUTES_LIST  : space-separated route counts (default: 2 3 4 5 6)
+#   NUM_ROUTES_LIST  : space-separated route counts (default: 2)
 #   ACTION_HORIZON   : fixed action chunk length (default: 72); trailing zeros after goal
-#   OUTPUT_DIR       : output base dir (default: data/genplan${SIZE});
+#   OUTPUT_DIR       : output base dir (default: ../demons/genplan${SIZE});
 #                      each run uses ${OUTPUT_DIR}_r${num_routes}
 #   SHARD_SIZE       : maps per NPZ shard (default: 100)
-#   ROBOT_RADIUS     : clearance inflation radius (default: 2)
+#   ROBOT_RADIUS     : clearance inflation radius (default: 3)
 #   PREVIEW_COUNT    : preview collage tiles (default: 16)
 #   MAX_MAP_ATTEMPTS : retries per accepted map (default: 80)
 ###############################################################################

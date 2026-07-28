@@ -4,23 +4,21 @@
 #
 # Reads demons/{id}/ for every listed demons id, expands each expert route into
 # one sample, and writes ../datasets/{dataset_name}/dataset/data_*.npz
-# (2048 samples per shard) plus dataset.json and idx/epoch_*.npy (300 epochs).
+# (2048 samples per shard) plus dataset.json and idx/epoch_*.npy.
 #
 # Usage:
 #   ./run_set.sh
 #   DATASET_NAME=genplan256_r2 DEMONS_IDS="genplan256_r2" ./run_set.sh
-#   SIZE=128 ./run_set.sh
 #   SHARD_SIZE=1024 NUM_IDX_PERMS=100 ./run_set.sh
 #
 # Tunables (env vars):
 #   PYTHON        : python interpreter (default: active venv, else repo .venv)
-#   SIZE          : map side length used in default job names (default: 256)
 #   DEMONS_IDS    : space-separated demons subdir names; when set with
 #                   DATASET_NAME, overrides to a single custom job
 #   DATASET_NAME  : output subdir under ../datasets/ (used with DEMONS_IDS)
 #   DEMONS_ROOT   : demons root directory (default: ../demons)
 #   SHARD_SIZE    : samples per shard npz (default: 2048)
-#   NUM_IDX_PERMS : shuffled idx/epoch_XXX.npy count (default: 300)
+#   NUM_IDX_PERMS : shuffled idx/epoch_XXX.npy count (default: 1000)
 #   IDX_PERM_SEED : base seed for epoch permutations (default: 0)
 #   ACTION_HORIZON: expected action chunk length (default: 72)
 ###############################################################################

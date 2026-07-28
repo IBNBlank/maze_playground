@@ -48,7 +48,7 @@ def _load_preview_samples(
             for local_i in range(take):
                 samples.append({
                     key: np.asarray(shard[key][local_i])
-                    for key in shard.files if key != "split"
+                    for key in shard.files
                 })
     return samples
 

@@ -22,7 +22,7 @@
 #                            (default: 500)
 #   GOAL_TOL               : pixel L2 success threshold (default: 2.0)
 #   MAZE_RUNS_ROOT         : ckpt/log root
-#                            (default: /mnt/data/maze_playground/runs)
+#                            (default: /mnt/data/runs/maze_playground)
 #   MAX_CONSECUTIVE_FAILS  : abort after this many hard crashes (default: 5)
 #   EXTRA_ARGS             : extra CLI args forwarded to train.py
 ###############################################################################
@@ -45,7 +45,7 @@ EPOCHS="${EPOCHS:-500}"
 EVAL_FREQ="${EVAL_FREQ:-5}"
 NUM_EVAL_EPISODES="${NUM_EVAL_EPISODES:-500}"
 GOAL_TOL="${GOAL_TOL:-2.0}"
-export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/maze_playground/runs}"
+export MAZE_RUNS_ROOT="${MAZE_RUNS_ROOT:-/mnt/data/runs/maze_playground}"
 MAX_CONSECUTIVE_FAILS="${MAX_CONSECUTIVE_FAILS:-5}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 USE_CLASS_VALUES=(0 1)
@@ -64,6 +64,7 @@ echo "[run_train] epochs=${EPOCHS} eval_freq=${EVAL_FREQ} use_class=${USE_CLASS_
 echo "[run_train] runs_root=${MAZE_RUNS_ROOT}"
 echo "[run_train] loop order: seed -> dataset -> algo -> use_class"
 
+fails=0
 for seed in ${MAZE_SEEDS}; do
 	for dataset in "${DATASETS[@]}"; do
 		DATASET_DIR="${REPO_DIR}/datasets/${dataset}"
@@ -86,7 +87,6 @@ for seed in ${MAZE_SEEDS}; do
 				echo "[run_train] === seed=${seed} dataset=${dataset} algo=${algo} use_class=${use_class} ==="
 				echo "######################################################################"
 
-				fails=0
 				# shellcheck disable=SC2086
 				"${PYTHON}" train.py \
 					--algo "${algo}" \

@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 # Absolute root for ckpts / logs. Override with MAZE_RUNS_ROOT.
 RUNS_ROOT = os.environ.get(
     "MAZE_RUNS_ROOT",
-    "/mnt/data/maze_playground/runs",
+    "/mnt/data/runs/maze_playground",
 )
 
 

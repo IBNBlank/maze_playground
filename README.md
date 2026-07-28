@@ -9,11 +9,11 @@ cd bench_data
 ./run_gen.sh
 # or
 ../.venv/bin/python data_gen.py \
-  --num-maps 500 --size 256 --num-routes 4 --seed 56 \
-  --output-dir ../dataset/genplan256_r4
+  --num-maps 500 --size 256 --num-routes 2 --seed 28 \
+  --output-dir ../demons/genplan256_r2
 ```
 
-`run_gen.sh` loops over `NUM_ROUTES_LIST` (default `2 3 4 5 6`), writing each dataset to `${OUTPUT_DIR}_r${num_routes}` with `seed = num_routes * 14`.
+`run_gen.sh` loops over `NUM_ROUTES_LIST` (default `2`), writing each dataset to `${OUTPUT_DIR}_r${num_routes}` with `seed = num_routes * 14`.
 
 Outputs per dataset:
 
@@ -37,24 +37,6 @@ Outputs per dataset:
 | `route_lengths` / `optimal_lengths` | Path length stats |
 
 Decode: `pixel[i+1] = pixel[i] + action[i]`, `q = pixel / (size - 1)`.
-
-## Single-map debug
-
-Dump every intermediate stage for one accepted map:
-
-```bash
-cd bench_data
-../.venv/bin/python data_gen_single.py \
-  --output-dir ../dataset/genplan256_single \
-  --size 256 --num-routes 4 --seed 7
-```
-
-| Path | Content |
-|------|---------|
-| `images/*.png` | Colored overlay per stage |
-| `arrays/*.npy` | Raw masks / paths / costs |
-| `steps.json` | Ordered stage list |
-| `sample_single.npz` | Final sample |
 
 ## Generation pipeline
 
@@ -80,7 +62,7 @@ flowchart TD
     F -.- F1["K diverse MCP routes"]
     G -.- G1["guide-constrained string-pull"]
     H -.- H1["waypoints_xy / action_chunks"]
-    J -.- J1["npz shards or sample_single.npz"]
+    J -.- J1["npz shards"]
 ```
 
 ### Stage notes
@@ -98,10 +80,26 @@ flowchart TD
 9. **validate** — Consecutive waypoint chords must be free on `planning_map`.
 10. **accept / retry** — Any failed check returns `None`; outer loop retries up to `max_map_attempts`.
 
+## Check / flatten
+
+```bash
+cd bench_data
+./run_check.sh   # optional QA: writes check_robots.png under each demons dir
+./run_set.sh     # flatten demons → ../datasets/{dataset_name}/
+```
+
+| Stage | Script | Input | Output |
+|-------|--------|-------|--------|
+| QA | `run_check.sh` | `../demons/genplan${SIZE}_r{N}/` | `check_robots.png` |
+| Flatten | `run_set.sh` | `../demons/{id}/` | `../datasets/{name}/dataset/`, `idx/`, `dataset.json` |
+
+`run_set.sh` expands each expert route into one training sample (`map` / `state` / `action_chunk` / `class`), default job `genplan256_r2`.
+
 ## bench_policy
 
-IL training / evaluation on `datasets/{dataset_name}` (build via `bench_data/`).
-`run_name = seed{seed}_{dataset_name}_{algo}`.
+IL training / evaluation on `datasets/{dataset_name}` (build via `bench_data/run_set.sh`).
+`run_name = [priv_]seed{seed}_{dataset_name}_{algo}`.
+Ckpts / logs default to `MAZE_RUNS_ROOT=/mnt/data/runs/maze_playground` (override with env).
 
 ```mermaid
 flowchart TB
@@ -114,16 +112,16 @@ flowchart TB
 
         train_python --> train_log
         subgraph train_log["logs"]
-            train_log_tensorboard["runs/{run_name}/ (tensorboard)"]
-            train_log_latest["runs/{run_name}/latest.json"]
-            train_log_success["runs/{run_name}/best_success.json"]
+            train_log_tensorboard["$MAZE_RUNS_ROOT/{run_name}/ (tensorboard)"]
+            train_log_latest["$MAZE_RUNS_ROOT/{run_name}/latest.json"]
+            train_log_success["$MAZE_RUNS_ROOT/{run_name}/best_success.json"]
         end
 
         train_python --> train_ckpt
         subgraph train_ckpt["ckpts"]
-            train_ckpt_mid["runs/{run_name}/ckpt_*.pt"]
-            train_ckpt_final["runs/{run_name}/final_ckpt.pt"]
-            train_ckpt_success["runs/{run_name}/best_success_ckpt.pt"]
+            train_ckpt_mid["$MAZE_RUNS_ROOT/{run_name}/ckpt_*.pt"]
+            train_ckpt_final["$MAZE_RUNS_ROOT/{run_name}/final_ckpt.pt"]
+            train_ckpt_success["$MAZE_RUNS_ROOT/{run_name}/best_success_ckpt.pt"]
         end
 
         train_python --> train_notify
@@ -141,9 +139,8 @@ flowchart TB
 
         eval_python --> eval_log
         subgraph eval_log["logs"]
-            eval_log_tb["runs/{run_name}/eval/ (tensorboard)"]
-            eval_log_result["runs/{run_name}/eval/eval_result.json"]
-            eval_log_preview["runs/{run_name}/eval/eval_preview.png"]
+            eval_log_result["$MAZE_RUNS_ROOT/{run_name}/eval/eval_result.json"]
+            eval_log_preview["$MAZE_RUNS_ROOT/{run_name}/eval/eval_preview.png"]
         end
 
         eval_bash --> eval_sweep["notify_eval.py → sweep summary"]
@@ -185,14 +182,14 @@ flowchart TB
 ```mermaid
 flowchart TB
     start["tyro.cli EvalArgs"] --> run_name["run_name = seed{seed}_{dataset}_{algo}"]
-    run_name --> init["device + TB eval/ + MazeWindowDataset"]
+    run_name --> init["device + MazeWindowDataset"]
     init --> episodes["build_eval_episodes(num_eval)"]
-    episodes --> policy["build_policy + load runs/{run_name}/{ckpt_name}"]
+    episodes --> policy["build_policy + load $MAZE_RUNS_ROOT/{run_name}/{ckpt_name}"]
     policy --> roll["evaluate open-loop rollouts"]
     roll --> metrics["success_rate / success_average_steps / collision_rate"]
     metrics --> log["log_eval_summary"]
-    log --> json["runs/{run_name}/eval/eval_result.json"]
-    roll -.-> preview["runs/{run_name}/eval/eval_preview.png"]
+    log --> json["$MAZE_RUNS_ROOT/{run_name}/eval/eval_result.json"]
+    roll -.-> preview["$MAZE_RUNS_ROOT/{run_name}/eval/eval_preview.png"]
     json --> done["return result"]
 ```
 
@@ -204,11 +201,11 @@ cd bench_policy
 ./run_train.sh
 # or
 ../.venv/bin/python train.py \
-  --algo bc --dataset-name genplan256_mix --seed 42 --epochs 50
+  --algo bc --dataset-name genplan256_r2 --seed 42 --epochs 50
 
 ./run_eval.sh
 # or
 ../.venv/bin/python eval.py \
-  --algo bc --dataset-name genplan256_mix --seed 42 \
+  --algo bc --dataset-name genplan256_r2 --seed 42 \
   --ckpt-name best_success_ckpt.pt
 ```

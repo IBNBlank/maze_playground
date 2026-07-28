@@ -464,22 +464,6 @@ def shortcut_path(
     return np.asarray(output, dtype=np.float32)
 
 
-def resample_polyline(path_xy: np.ndarray, num_points: int) -> np.ndarray:
-    segment_lengths = np.linalg.norm(np.diff(path_xy, axis=0), axis=1)
-    cumulative = np.concatenate([
-        np.zeros(1, dtype=np.float32),
-        np.cumsum(segment_lengths, dtype=np.float32)
-    ])
-    total = float(cumulative[-1])
-    if total <= 1e-8:
-        raise ValueError("Zero-length path")
-    query = np.linspace(0.0, total, num_points, dtype=np.float32)
-    result = np.empty((num_points, 2), dtype=np.float32)
-    result[:, 0] = np.interp(query, cumulative, path_xy[:, 0])
-    result[:, 1] = np.interp(query, cumulative, path_xy[:, 1])
-    return result
-
-
 def _linf(delta: np.ndarray) -> float:
     return float(max(abs(float(delta[0])), abs(float(delta[1]))))
 

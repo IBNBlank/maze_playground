@@ -15,17 +15,17 @@ from dataclasses import dataclass, asdict
 class Args:
     """CLI options for multimodal planning-map generation."""
 
-    num_maps: int = 1000
+    num_maps: int = 5000
     size: int = 256
-    num_routes: int = 4
+    num_routes: int = 2
     # Fixed chunk length; trailing zeros after goal. Empirically ~50–70 steps
     # at size=256 / max_abs_delta=5 after shortcut (see route_to_chunk).
     action_horizon: int = 72
     max_abs_delta: float = 5.0
-    output_dir: Path = Path("../dataset/genplan256")
+    output_dir: Path = Path("../demons/genplan256")
     shard_size: int = 100
     seed: int = 7
-    robot_radius: int = 5
+    robot_radius: int = 3
     preview_count: int = 16
     max_map_attempts: int = 80
 
@@ -47,7 +47,6 @@ class GenCfg:
     route_separation_ratio: float = 0.5
 
     # Free-space geometry.
-    protected_core_radius: int = 5
     endpoint_room_radius: int = 18
     room_radius_min: int = 9
     room_radius_max: int = 20
@@ -80,7 +79,7 @@ class GenCfg:
 class CheckArgs:
     """Visualize the same leading maps as preview, with per-step robots."""
 
-    dataset_dir: Path = Path("../dataset/genplan256_r2")
+    dataset_dir: Path = Path("../demons/genplan256_r2")
     preview_count: int = 16
     output: Path | None = None
 
@@ -96,7 +95,7 @@ class SetArgs:
     # Default: ../datasets/{dataset_name}
     out_dir: Path | None = None
     shard_size: int = 2048
-    num_idx_perms: int = 300
+    num_idx_perms: int = 1000
     idx_perm_seed: int = 0
     # Validate action_chunks length; 0 skips the check.
     action_horizon: int = 72
@@ -133,7 +132,6 @@ def config_init(args: Args) -> GenCfg:
         max_map_attempts=args.max_map_attempts,
         border_width=max(2, round(3 * scale)),
         endpoint_margin=max(10, round(18 * scale)),
-        protected_core_radius=max(2, round(5 * scale)),
         endpoint_room_radius=max(8, round(18 * scale)),
         room_radius_min=max(5, round(9 * scale)),
         room_radius_max=max(8, round(20 * scale)),
